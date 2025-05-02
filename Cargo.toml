@@ -5,3 +5,5 @@ members = [
   "ws-mini-server",
   "wsgator",
 ]
+
+resolver = "3"
