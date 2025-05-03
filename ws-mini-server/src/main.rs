@@ -50,7 +50,11 @@ async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: A
             loop {
                 tokio::select!(
                     Some(msg) = msg_rx.recv() => {
-                        write.send(msg).await.expect("Can't send a message");
+                        if write.send(msg)
+                            .await
+                            .is_err() {
+                                break;
+                            }
                     },
                     _ = shutdown_rx.changed() => {
                         break;
@@ -70,37 +74,35 @@ async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: A
             loop {
                 tokio::select!(
                     Some(message) = read.next() => {
+                        match message {
+                            Ok(Message::Text(txt)) => {
+                                println!("Message recieved: {}", txt);
+                                if let Err(_e) = msg_tx
+                                    .send(Message::Text(format!("Server response: {}", txt).into()))
+                                    .await { break; }
+                            }
+                            Ok(Message::Ping(data)) => {
+                                println!("Ping recieved!");
+                                if let Err(_e) = msg_tx
+                                    .send(Message::Pong(data))
+                                    .await { break; }
+                            }
 
-                match message {
-                    Ok(Message::Text(txt)) => {
-                        println!("Message recieved: {}", txt);
-                        if let Err(_e) = msg_tx
-                            .send(Message::Text(txt))
-                            .await {
+                            Ok(Message::Pong(_data)) => {
+                                println!("Pong Recieved!");
+                                if let Err(_e) = pong_tx
+                                    .send(true)
+                                    .await { break; }
+                            }
+
+                            Ok(Message::Close(_)) => {
+                                println!("Client closed connection");
+                                let _ = shutdown_tx.send(true);
                                 break;
+                            }
+
+                            _ => {}
                         }
-                    }
-                    Ok(Message::Ping(data)) => {
-                        println!("Ping recieved!");
-                        msg_tx
-                            .send(Message::Pong(data))
-                            .await
-                            .expect("Can't use channel");
-                    }
-
-                    Ok(Message::Pong(_data)) => {
-                        println!("Pong Recieved!");
-                        pong_tx.send(true).await.expect("Can't use channel");
-                    }
-
-                    Ok(Message::Close(_)) => {
-                        println!("Client closed connection");
-                        let _ = shutdown_tx.send(true);
-                        break;
-                    }
-                    _ => {}
-                }
-
                     },
 
                     _ = shutdown_rx.changed() => {
@@ -122,10 +124,9 @@ async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: A
 
                 _ = inteval.tick() => {
                     println!("Sending ping!");
-                    msg_tx
+                    if let Err(_e) = msg_tx
                         .send(Message::Ping("ping".into()))
-                        .await
-                        .expect("Can't use channel");
+                        .await { break; }
 
                     let pong_timer =
                         tokio::time::timeout(Duration::from_secs(10), pong_rx.recv()).await;
