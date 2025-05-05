@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::sync::Arc;
 
 mod strategies;
 use strategies::*;
@@ -15,10 +16,10 @@ struct Args {
     strategy: AttackStrategyType,
 }
 
-fn get_strategy(strategy_type: AttackStrategyType) -> Box<dyn AttackStrategy + Send + Sync> {
+fn get_strategy(strategy_type: AttackStrategyType) -> impl AttackStrategy {
     match strategy_type {
-        AttackStrategyType::Flat => Box::new(FlatStrategy),
-        AttackStrategyType::RampUp => Box::new(RampUpStrategy),
+        AttackStrategyType::Flat => FlatStrategy,
+        //AttackStrategyType::RampUp => Arc::new(RampUpStrategy),
     }
 }
 
@@ -26,8 +27,9 @@ fn get_strategy(strategy_type: AttackStrategyType) -> Box<dyn AttackStrategy + S
 async fn main() {
     let args = Args::parse();
 
-    let strategy = get_strategy(args.strategy);
-    strategy.run(&args).await;
+    let strategy = Arc::new(get_strategy(args.strategy));
+
+    Arc::clone(&strategy).run(&args).await;
 
     tokio::signal::ctrl_c().await.unwrap();
 }

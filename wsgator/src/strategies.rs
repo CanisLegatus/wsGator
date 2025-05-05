@@ -2,6 +2,7 @@ use crate::Args;
 use async_trait::async_trait;
 use futures::SinkExt;
 use futures::StreamExt;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -10,13 +11,49 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum AttackStrategyType {
     Flat,
-    RampUp,
+    //    RampUp,
 }
 
 #[async_trait]
-pub trait AttackStrategy {
+pub trait AttackStrategy: Send + Sync {
     fn name(&self) -> AttackStrategyType;
-    async fn run(&self, args: &Args);
+    async fn run(self: Arc<Self>, args: &Args);
+    fn handle_messages(
+        &self,
+        msg: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
+        connection_number: usize,
+    ) -> (bool, Option<Message>) {
+        match msg {
+            Some(Ok(message)) => match message {
+                Message::Ping(bytes) => {
+                    (true, Some(Message::Pong(bytes)))
+                }
+
+                Message::Text(txt) => {
+                    println!("Connection {}: Recieved a text: {}", connection_number, txt);
+                    (true, None)
+                }
+
+                _ => {
+                    (false, None)
+                }
+            },
+            Some(Err(e)) => {
+                println!(
+                    "Connection {}: Recieved Err inside a message on listening to next message: {}",
+                    connection_number, e
+                );
+                (false, None)
+            }
+            None => {
+                println!(
+                    "Connection {}: Recieved None on listening to next message",
+                    connection_number
+                );
+                (false, None)
+            }
+        }
+    }
 }
 
 pub struct FlatStrategy;
@@ -27,11 +64,14 @@ impl AttackStrategy for FlatStrategy {
     fn name(&self) -> AttackStrategyType {
         AttackStrategyType::Flat
     }
-    async fn run(&self, args: &Args) {
+    async fn run(self: Arc<Self>, args: &Args) {
+        let strategy = Arc::clone(&self);
+
         for i in 0..args.connections {
+            let strategy = Arc::clone(&strategy);
             let url = args.url.clone();
 
-            let mut interval = interval(Duration::from_secs(12));
+            let mut interval = interval(Duration::from_secs(60));
             interval.tick().await;
 
             tokio::spawn(async move {
@@ -49,34 +89,25 @@ impl AttackStrategy for FlatStrategy {
                         loop {
                             tokio::select! {
                                 msg = ws.next() => {
-                                    match msg {
-                                        Some(Ok(message)) => {
-                                            match message {
-                                                Message::Ping(bytes) => {
-                                                    if let Err(e) = ws.send(Message::Pong(bytes)).await {
-                                                        println!("Connection {}: Can't send Pong message: {}", i, e);
-                                                        break;
-                                                    }
-                                                },
-                                                _ => {},
-                                            }
-                                        },
-                                        Some(Err(e)) => {
-                                            println!("Connection {}: Recieved Err inside a message on listening to next message: {}", i, e);
-                                            break;
-                                        }
-                                        None => {
-                                            println!("Connection {}: Recieved None on listening to next message", i);
-                                            break;
-                                        }
+                                let (proceed, message) = strategy.handle_messages(msg, i);
+
+                                if let Some(message) = message {
+                                    if let Err(e) = ws.send(message).await {
+                                        println!("Connection: {}: Can't send message: {}", i, e);
+                                        break;
                                     }
+                                }
+
+                                if !proceed {
+                                        break;
+                                    }
+
                                 },
                                 _ = interval.tick() => {
                                     println!("Connection {}: Reached its target time. Sending Close Frame", i);
 
                                     if let Err(e) = ws.send(Message::Close(None)).await {
                                         println!("Connection: {}: Can't send Close Frame: {}", i, e);
-                                        break;
                                     }
                                     break;
 
@@ -92,13 +123,4 @@ impl AttackStrategy for FlatStrategy {
             });
         }
     }
-}
-
-#[async_trait]
-impl AttackStrategy for RampUpStrategy {
-    fn name(&self) -> AttackStrategyType {
-        AttackStrategyType::RampUp
-    }
-
-    async fn run(&self, args: &Args) {}
 }
