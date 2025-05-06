@@ -11,13 +11,13 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum AttackStrategyType {
     Flat,
-    //    RampUp,
+    RampUp,
 }
 
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn name(&self) -> AttackStrategyType;
-    async fn run(self: Arc<Self>, args: &Args);
+    async fn run(&self, args: &Args);
     fn handle_messages(
         &self,
         msg: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
@@ -64,7 +64,7 @@ impl AttackStrategy for FlatStrategy {
     fn name(&self) -> AttackStrategyType {
         AttackStrategyType::Flat
     }
-    async fn run(self: Arc<Self>, args: &Args) {
+    async fn run(&self, args: &Args) {
         let strategy = Arc::clone(&self);
 
         for i in 0..args.connections {
@@ -123,4 +123,15 @@ impl AttackStrategy for FlatStrategy {
             });
         }
     }
+}
+
+#[async_trait]
+impl AttackStrategy for RampUpStrategy {
+    
+    fn name(&self) -> AttackStrategyType {
+        AttackStrategyType::RampUp
+    }
+
+    async fn run(&self, args: &Args) {}
+
 }

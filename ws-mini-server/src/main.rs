@@ -26,12 +26,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         drop(n_counter);
-
-        let ws_stream = accept_async(stream)
-            .await
-            .expect("WebSocker connection Error");
-        println!("New connection found!");
-        tokio::spawn(handle_ws(ws_stream, counter.clone()));
+        
+        match accept_async(stream).await {
+            Ok(ws_stream) => {
+                println!("New connection found!");
+                tokio::spawn(handle_ws(ws_stream, counter.clone()));
+            }
+            Err(e) => {
+                println!("WebSocket connection Error: {}", e);
+                continue;
+            }
+        }
     }
 
     Ok(())

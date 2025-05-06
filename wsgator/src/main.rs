@@ -16,10 +16,10 @@ struct Args {
     strategy: AttackStrategyType,
 }
 
-fn get_strategy(strategy_type: AttackStrategyType) -> impl AttackStrategy {
+fn get_strategy(strategy_type: AttackStrategyType) -> Arc<dyn AttackStrategy> {
     match strategy_type {
-        AttackStrategyType::Flat => FlatStrategy,
-        //AttackStrategyType::RampUp => Arc::new(RampUpStrategy),
+        AttackStrategyType::Flat => Arc::new(FlatStrategy),
+        AttackStrategyType::RampUp => Arc::new(RampUpStrategy),
     }
 }
 
