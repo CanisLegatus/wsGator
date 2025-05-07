@@ -27,9 +27,8 @@ fn get_strategy(strategy_type: AttackStrategyType) -> Arc<dyn AttackStrategy> {
 async fn main() {
     let args = Args::parse();
 
-    let strategy = Arc::new(get_strategy(args.strategy));
-
-    Arc::clone(&strategy).run(&args).await;
+    let strategy = get_strategy(args.strategy);
+    strategy.run(&args).await;
 
     tokio::signal::ctrl_c().await.unwrap();
 }

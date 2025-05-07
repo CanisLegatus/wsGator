@@ -17,7 +17,7 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn name(&self) -> AttackStrategyType;
-    async fn run(&self, args: &Args);
+    async fn run(self: Arc<Self>, args: &Args);
     fn handle_messages(
         &self,
         msg: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
@@ -64,12 +64,13 @@ impl AttackStrategy for FlatStrategy {
     fn name(&self) -> AttackStrategyType {
         AttackStrategyType::Flat
     }
-    async fn run(&self, args: &Args) {
+    async fn run(self: Arc<Self>, args: &Args) {
+        
         let strategy = Arc::clone(&self);
 
         for i in 0..args.connections {
-            let strategy = Arc::clone(&strategy);
             let url = args.url.clone();
+            let strat = Arc::clone(&strategy);
 
             let mut interval = interval(Duration::from_secs(60));
             interval.tick().await;
@@ -89,7 +90,7 @@ impl AttackStrategy for FlatStrategy {
                         loop {
                             tokio::select! {
                                 msg = ws.next() => {
-                                let (proceed, message) = strategy.handle_messages(msg, i);
+                                let (proceed, message) = strat.handle_messages(msg, i);
 
                                 if let Some(message) = message {
                                     if let Err(e) = ws.send(message).await {
@@ -117,7 +118,6 @@ impl AttackStrategy for FlatStrategy {
                     }
                     Err(e) => {
                         println!("Connection {}: Error on WS connection: {}", i, e);
-                        return;
                     }
                 }
             });
@@ -132,6 +132,6 @@ impl AttackStrategy for RampUpStrategy {
         AttackStrategyType::RampUp
     }
 
-    async fn run(&self, args: &Args) {}
+    async fn run(self: Arc<Self>, args: &Args) {}
 
 }
