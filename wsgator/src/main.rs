@@ -9,8 +9,20 @@ struct Args {
     #[clap(short, long, default_value = "ws://localhost:9001")]
     url: String,
 
-    #[clap(short, long, default_value = "2")]
-    connections: usize,
+    #[arg(long, default_value = "100", value_parser = clap::value_parser!(u32).range(1..))]
+    connections: u32,
+
+    #[clap(long, default_value = "1", value_parser = clap::value_parser!(u32).range(1..))]
+    waves_amount: u32,
+
+    #[arg(short, long, default_value = "0", value_parser = clap::value_parser!(u32).range(0..))]
+    waves_pause: u32,
+
+    #[clap(long, default_value = "30", value_parser = clap::value_parser!(u32).range(1..))]
+    connection_duration: u32,
+
+    #[clap(short, long, default_value = "20", value_parser = clap::value_parser!(u32).range(0..))]
+    connection_pause: u32,
 
     #[clap(short, long, value_enum, default_value_t = AttackStrategyType::Flat)]
     strategy: AttackStrategyType,

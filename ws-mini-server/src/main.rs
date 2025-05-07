@@ -1,12 +1,12 @@
-use futures::lock::Mutex;
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::lock::Mutex;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         drop(n_counter);
-        
+
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 println!("New connection found!");
