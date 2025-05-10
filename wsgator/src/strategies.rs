@@ -5,6 +5,7 @@ use futures::StreamExt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
+use tokio::sync::watch::Receiver;
 use tokio::time::interval;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -19,6 +20,7 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy {
     fn name(&self) -> AttackStrategyType;
+    async fn run_connection_loop(self: Arc<Self>, args: &Args, stop_rx: Receiver<bool>, i: u32);
     async fn run(self: Arc<Self>, args: &Args);
     fn handle_messages(
         &self,
@@ -67,7 +69,7 @@ impl AttackStrategy for FloodStrategy {
 
     async fn run(self: Arc<Self>, args: &Args) {
         for _wave in 0..args.waves_amount {
-            let (tx, rx) = watch::channel(false);
+            let (stop_tx, stop_rx) = watch::channel(false);
             let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
             interval.tick().await;
 
@@ -77,70 +79,78 @@ impl AttackStrategy for FloodStrategy {
             //Spawning timer to cancell all threads
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(timer as u64)).await;
-                let _ = tx.send(true);
+                let _ = stop_tx.send(true);
             });
 
             // Creating connections
             for i in 0..args.connections {
-                let url = args.url.clone();
-                let strat = Arc::clone(&self);
-                let mut rx = rx.clone();
-                let spam_pause = args.spam_pause;
+                let strategy = Arc::clone(&self);
+                let rx = stop_rx.clone();
 
                 // Spawning thread for each connection
-                tokio::spawn(async move {
-                    match connect_async(&url).await {
-                        Ok((mut ws, _)) => {
-                            if let Err(e) = ws
-                                .send(Message::Text(format!("Peer {} saying Hello!", i).into()))
-                                .await
-                            {
-                                println!("Connection {}: Can't send HELLO on connection: {}", i, e);
-                                return;
-                            }
+                strategy.run_connection_loop(args, rx, i).await;
+            }
 
-                            // Main strategy logic loop
-                            loop {
-                                tokio::select! {
-                                    msg = ws.next() => {
-                                        let (proceed, message) = strat.handle_messages(msg, i);
+            // Waves delay timer
+            tokio::time::sleep(Duration::from_secs(args.waves_pause as u64)).await;
+        }
+    }
 
-                                        if let Some(message) = message {
-                                            if let Err(e) = ws.send(message).await {
-                                                println!("Connection: {}: Can't send message: {}", i, e);
-                                                break;
-                                            }
-                                        }
+    async fn run_connection_loop(self: Arc<Self>, args: &Args, mut rx: Receiver<bool>, i: u32) {
+        let url = args.url.clone();
+        let spam_pause = args.spam_pause;
 
-                                        if !proceed {
-                                            break;
-                                        }
-                                    },
+        tokio::spawn(async move {
+            match connect_async(&url).await {
+                Ok((mut ws, _)) => {
+                    if let Err(e) = ws
+                        .send(Message::Text(format!("Peer {} saying Hello!", i).into()))
+                        .await
+                    {
+                        println!("Connection {}: Can't send HELLO on connection: {}", i, e);
+                        return;
+                    }
 
-                                    // Spamming with constant messages
-                                    _ = tokio::time::sleep(Duration::from_millis(spam_pause as u64)) => {
-                                       if let Err(e) = ws.send(Message::Text(format!("SPAM! From connection {}", i).into())).await {
-                                           println!("Connection {}: Can't send SPAM message! Error: {}", i, e);
-                                           break;
-                                       }
-                                    }
+                    // Main strategy logic loop
+                    loop {
+                        tokio::select! {
+                            msg = ws.next() => {
+                                let (proceed, message) = self.handle_messages(msg, i);
 
-                                    _ = rx.changed() => {
-                                        // Doing "dirty" connection drop
-                                        println!("Connection {}: Reached its target time. Dropping connection", i);
-                                        drop(ws);
+                                if let Some(message) = message {
+                                    if let Err(e) = ws.send(message).await {
+                                        println!("Connection: {}: Can't send message: {}", i, e);
                                         break;
                                     }
                                 }
+
+                                if !proceed {
+                                    break;
+                                }
+                            },
+
+                            // Spamming with constant messages
+                            _ = tokio::time::sleep(Duration::from_millis(spam_pause as u64)) => {
+                               if let Err(e) = ws.send(Message::Text(format!("SPAM! From connection {}", i).into())).await {
+                                   println!("Connection {}: Can't send SPAM message! Error: {}", i, e);
+                                   break;
+                               }
+                            }
+
+                            _ = rx.changed() => {
+                                // Doing "dirty" connection drop
+                                println!("Connection {}: Reached its target time. Dropping connection", i);
+                                drop(ws);
+                                break;
                             }
                         }
-                        Err(e) => {
-                            println!("Connection {}: Error on WS connection: {}", i, e);
-                        }
                     }
-                });
+                }
+                Err(e) => {
+                    println!("Connection {}: Error on WS connection: {}", i, e);
+                }
             }
-        }
+        });
     }
 }
 
@@ -151,7 +161,7 @@ impl AttackStrategy for FlatStrategy {
     }
     async fn run(self: Arc<Self>, args: &Args) {
         for _wave in 0..args.waves_amount {
-            let (tx, rx) = watch::channel(false);
+            let (stop_tx, stop_rx) = watch::channel(false);
             let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
             interval.tick().await;
 
@@ -161,65 +171,68 @@ impl AttackStrategy for FlatStrategy {
             // Spawning timer to cancell all threads
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(timer as u64)).await;
-                let _ = tx.send(true);
+                let _ = stop_tx.send(true);
             });
 
             // Creating connetctions
             for i in 0..args.connections {
-                let url = args.url.clone();
-                let strat = Arc::clone(&self);
-                let mut rx = rx.clone();
+                let strategy = Arc::clone(&self);
+                let rx = stop_rx.clone();
 
                 // Spawning threads for each connection
-                tokio::spawn(async move {
-                    match connect_async(&url).await {
-                        Ok((mut ws, _)) => {
-                            if let Err(e) = ws
-                                .send(Message::Text(format!("Peer {} saying Hello!", i).into()))
-                                .await
-                            {
-                                println!("Connection {}: Can't send HELLO on connection: {}", i, e);
-                                return;
-                            }
-
-                            // Connection loop
-                            loop {
-                                tokio::select! {
-                                    msg = ws.next() => {
-                                        let (proceed, message) = strat.handle_messages(msg, i);
-
-                                        if let Some(message) = message {
-                                            if let Err(e) = ws.send(message).await {
-                                                println!("Connection: {}: Can't send message: {}", i, e);
-                                                break;
-                                            }
-                                        }
-
-                                        if !proceed {
-                                            break;
-                                        }
-                                    },
-
-                                    _ = rx.changed() => {
-                                        // Doing "dirty" connection drop
-                                        println!("Connection {}: Reached its target time. Sending Close Frame", i);
-                                        drop(ws);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("Connection {}: Error on WS connection: {}", i, e);
-                        }
-                    }
-                });
-                // New connection timer
-                tokio::time::sleep(Duration::from_millis(0)).await;
+                strategy.run_connection_loop(args, rx, i).await;
             }
             // Waves timer
             tokio::time::sleep(Duration::from_secs(args.waves_pause as u64)).await;
         }
+    }
+
+    async fn run_connection_loop(self: Arc<Self>, args: &Args, mut rx: Receiver<bool>, i: u32) {
+        let url = args.url.clone();
+
+        tokio::spawn(async move {
+            match connect_async(&url).await {
+                Ok((mut ws, _)) => {
+                    if let Err(e) = ws
+                        .send(Message::Text(format!("Peer {} saying Hello!", i).into()))
+                        .await
+                    {
+                        println!("Connection {}: Can't send HELLO on connection: {}", i, e);
+                        return;
+                    }
+
+                    // Connection loop
+                    loop {
+                        tokio::select! {
+                            msg = ws.next() => {
+                                let (proceed, message) = self.handle_messages(msg, i);
+
+                                if let Some(message) = message {
+                                    if let Err(e) = ws.send(message).await {
+                                        println!("Connection: {}: Can't send message: {}", i, e);
+                                        break;
+                                    }
+                                }
+
+                                if !proceed {
+                                    break;
+                                }
+                            },
+
+                            _ = rx.changed() => {
+                                // Doing "dirty" connection drop
+                                println!("Connection {}: Reached its target time. Sending Close Frame", i);
+                                drop(ws);
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Connection {}: Error on WS connection: {}", i, e);
+                }
+            }
+        });
     }
 }
 
@@ -231,63 +244,72 @@ impl AttackStrategy for RampUpStrategy {
 
     async fn run(self: Arc<Self>, args: &Args) {
         for _wave in 0..args.waves_amount {
+            //TODO - I need to get rid of this fake things (Option? - Isn't it a dirty way?)
+            let (_stop_tx, stop_rx) = watch::channel(false);
+
             for i in 0..args.connections {
-                let url = args.url.clone();
-                let strat = Arc::clone(&self);
+                let strategy = Arc::clone(&self);
+                let stop_rx = stop_rx.clone();
 
-                let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
-                interval.tick().await;
-
-                tokio::spawn(async move {
-                    match connect_async(&url).await {
-                        Ok((mut ws, _)) => {
-                            if let Err(e) = ws
-                                .send(Message::Text(format!("Peer {} saying Hello!", i).into()))
-                                .await
-                            {
-                                println!("Connection {}: Can't send HELLO on connection: {}", i, e);
-                                return;
-                            }
-
-                            // Connection loop
-                            loop {
-                                tokio::select! {
-                                    msg = ws.next() => {
-                                        let (proceed, message) = strat.handle_messages(msg, i);
-
-                                        if let Some(message) = message {
-                                            if let Err(e) = ws.send(message).await {
-                                                println!("Connection: {}: Can't send message: {}", i, e);
-                                                break;
-                                            }
-                                        }
-
-                                        if !proceed {
-                                            break;
-                                        }
-                                    },
-
-                                    _ = interval.tick() => {
-                                        println!("Connection {}: Reached its target time. Sending Close Frame", i);
-
-                                        if let Err(e) = ws.send(Message::Close(None)).await {
-                                            println!("Connection: {}: Can't send Close Frame: {}", i, e);
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("Connection {}: Error on WS connection: {}", i, e);
-                        }
-                    }
-                });
+                strategy.run_connection_loop(args, stop_rx, i).await;
                 // New connection timer
                 tokio::time::sleep(Duration::from_millis(args.connection_pause as u64)).await;
             }
             // Waves timer
             tokio::time::sleep(Duration::from_secs(args.waves_pause as u64)).await;
         }
+    }
+
+    async fn run_connection_loop(self: Arc<Self>, args: &Args, _rx: Receiver<bool>, i: u32) {
+        let url = args.url.clone();
+
+        let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
+        interval.tick().await;
+
+        tokio::spawn(async move {
+            match connect_async(&url).await {
+                Ok((mut ws, _)) => {
+                    if let Err(e) = ws
+                        .send(Message::Text(format!("Peer {} saying Hello!", i).into()))
+                        .await
+                    {
+                        println!("Connection {}: Can't send HELLO on connection: {}", i, e);
+                        return;
+                    }
+
+                    // Connection loop
+                    loop {
+                        tokio::select! {
+                            msg = ws.next() => {
+                                let (proceed, message) = self.handle_messages(msg, i);
+
+                                if let Some(message) = message {
+                                    if let Err(e) = ws.send(message).await {
+                                        println!("Connection: {}: Can't send message: {}", i, e);
+                                        break;
+                                    }
+                                }
+
+                                if !proceed {
+                                    break;
+                                }
+                            },
+
+                            _ = interval.tick() => {
+                                println!("Connection {}: Reached its target time. Sending Close Frame", i);
+
+                                if let Err(e) = ws.send(Message::Close(None)).await {
+                                    println!("Connection: {}: Can't send Close Frame: {}", i, e);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Connection {}: Error on WS connection: {}", i, e);
+                }
+            }
+        });
     }
 }
