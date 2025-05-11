@@ -21,7 +21,35 @@ pub enum AttackStrategyType {
 pub trait AttackStrategy {
     fn name(&self) -> AttackStrategyType;
     async fn run_connection_loop(self: Arc<Self>, args: &Args, stop_rx: Receiver<bool>, i: u32);
-    async fn run(self: Arc<Self>, args: &Args);
+    async fn run(self: Arc<Self>, args: &Args) {
+        for _wave in 0..args.waves_amount {
+            let (stop_tx, stop_rx) = watch::channel(false);
+            let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
+            interval.tick().await;
+
+            // Creating independent timer
+            let timer = args.connection_duration;
+
+            //Spawning timer to cancell all threads
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(timer as u64)).await;
+                let _ = stop_tx.send(true);
+            });
+
+            // Creating connections
+            for i in 0..args.connections {
+                let strategy = Arc::clone(&self);
+                let rx = stop_rx.clone();
+
+                // Spawning thread for each connection
+                strategy.run_connection_loop(args, rx, i).await;
+            }
+
+            // Waves delay timer
+            tokio::time::sleep(Duration::from_secs(args.waves_pause as u64)).await;
+        }
+    }
+
     fn handle_messages(
         &self,
         msg: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,

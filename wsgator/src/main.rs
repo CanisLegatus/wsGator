@@ -34,7 +34,9 @@ struct Args {
     spam_pause: u32,
 }
 
-fn get_strategy(strategy_type: AttackStrategyType) -> Arc<dyn AttackStrategy> {
+fn get_strategy(
+    strategy_type: AttackStrategyType,
+) -> Arc<dyn AttackStrategy + Send + Sync + 'static> {
     match strategy_type {
         AttackStrategyType::Flat => Arc::new(FlatStrategy),
         AttackStrategyType::RampUp => Arc::new(RampUpStrategy),
@@ -46,7 +48,7 @@ fn get_strategy(strategy_type: AttackStrategyType) -> Arc<dyn AttackStrategy> {
 async fn main() {
     let args = Args::parse();
 
-    let strategy = get_strategy(args.strategy);
+    let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.strategy);
     strategy.run(&args).await;
 
     tokio::signal::ctrl_c().await.unwrap();
