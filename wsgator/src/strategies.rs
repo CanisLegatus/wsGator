@@ -17,36 +17,79 @@ pub enum AttackStrategyType {
     Flood,
 }
 
+pub struct AttackConfig {
+    url_under_fire: String,
+    connection_number: u32,
+    connection_duration: u64,
+    connection_pause: Option<u64>,
+    waves_number: u32,
+    waves_pause: u64,
+    spam_pause: Option<u64>,
+    external_timer: Option<u64>,
+}
+
+impl From<Args> for AttackConfig {
+    fn from(value: Args) -> Self {
+        let (spam_pause, external_timer, connection_pause) = match value.strategy {
+            AttackStrategyType::Flat => (None, Some(value.connection_duration), None),
+            AttackStrategyType::RampUp => (None, None, Some(value.connection_pause)),
+            AttackStrategyType::Flood => (
+                Some(value.connection_pause),
+                Some(value.connection_duration),
+                None,
+            ),
+        };
+
+        AttackConfig {
+            url_under_fire: value.url,
+            connection_number: value.connection_number,
+            connection_duration: value.connection_duration,
+            connection_pause,
+            waves_number: value.waves_number,
+            waves_pause: value.waves_pause,
+            spam_pause,
+            external_timer,
+        }
+    }
+}
+
 #[async_trait]
 pub trait AttackStrategy {
-    fn name(&self) -> AttackStrategyType;
-    async fn run_connection_loop(self: Arc<Self>, args: &Args, stop_rx: Receiver<bool>, i: u32);
-    async fn run(self: Arc<Self>, args: &Args) {
-        for _wave in 0..args.waves_amount {
-            let (stop_tx, stop_rx) = watch::channel(false);
-            let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
-            interval.tick().await;
-
-            // Creating independent timer
-            let timer = args.connection_duration;
-
-            //Spawning timer to cancell all threads
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(timer as u64)).await;
-                let _ = stop_tx.send(true);
-            });
+    async fn run_connection_loop(
+        self: Arc<Self>,
+        config: &AttackConfig,
+        stop_rx: Option<Receiver<bool>>,
+        i: u32,
+    );
+    async fn run(self: Arc<Self>, config: &AttackConfig) {
+        for _wave in 0..config.waves_number {
+            // Creating independent watch_channel to stop all tasks extenally
+            let mut watch_channel: Option<Receiver<bool>> = None;
+            if let Some(timer) = config.external_timer {
+                let (stop_tx, stop_rx) = watch::channel(false);
+                watch_channel = Some(stop_rx);
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(timer)).await;
+                    let _ = stop_tx.send(true);
+                });
+            };
 
             // Creating connections
-            for i in 0..args.connections {
+            for i in 0..config.connection_number {
                 let strategy = Arc::clone(&self);
-                let rx = stop_rx.clone();
+                let rx = watch_channel.clone();
 
                 // Spawning thread for each connection
-                strategy.run_connection_loop(args, rx, i).await;
+                strategy.run_connection_loop(config, rx, i).await;
+
+                // Pause between connections if applied
+                if let Some(connection_pause) = config.connection_pause {
+                    tokio::time::sleep(Duration::from_secs(connection_pause)).await;
+                }
             }
 
             // Waves delay timer
-            tokio::time::sleep(Duration::from_secs(args.waves_pause as u64)).await;
+            tokio::time::sleep(Duration::from_secs(config.waves_pause)).await;
         }
     }
 
@@ -91,42 +134,20 @@ pub struct FloodStrategy;
 
 #[async_trait]
 impl AttackStrategy for FloodStrategy {
-    fn name(&self) -> AttackStrategyType {
-        AttackStrategyType::Flood
-    }
+    async fn run_connection_loop(
+        self: Arc<Self>,
+        config: &AttackConfig,
+        rx: Option<Receiver<bool>>,
+        i: u32,
+    ) {
+        let url = config.url_under_fire.clone();
+        let spam_pause = config.spam_pause.unwrap_or(100);
 
-    async fn run(self: Arc<Self>, args: &Args) {
-        for _wave in 0..args.waves_amount {
-            let (stop_tx, stop_rx) = watch::channel(false);
-            let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
-            interval.tick().await;
-
-            // Creating independent timer
-            let timer = args.connection_duration;
-
-            //Spawning timer to cancell all threads
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(timer as u64)).await;
-                let _ = stop_tx.send(true);
-            });
-
-            // Creating connections
-            for i in 0..args.connections {
-                let strategy = Arc::clone(&self);
-                let rx = stop_rx.clone();
-
-                // Spawning thread for each connection
-                strategy.run_connection_loop(args, rx, i).await;
-            }
-
-            // Waves delay timer
-            tokio::time::sleep(Duration::from_secs(args.waves_pause as u64)).await;
-        }
-    }
-
-    async fn run_connection_loop(self: Arc<Self>, args: &Args, mut rx: Receiver<bool>, i: u32) {
-        let url = args.url.clone();
-        let spam_pause = args.spam_pause;
+        let mut rx = if let Some(rx) = rx {
+            rx
+        } else {
+            return;
+        };
 
         tokio::spawn(async move {
             match connect_async(&url).await {
@@ -158,7 +179,7 @@ impl AttackStrategy for FloodStrategy {
                             },
 
                             // Spamming with constant messages
-                            _ = tokio::time::sleep(Duration::from_millis(spam_pause as u64)) => {
+                            _ = tokio::time::sleep(Duration::from_millis(spam_pause)) => {
                                if let Err(e) = ws.send(Message::Text(format!("SPAM! From connection {}", i).into())).await {
                                    println!("Connection {}: Can't send SPAM message! Error: {}", i, e);
                                    break;
@@ -184,39 +205,19 @@ impl AttackStrategy for FloodStrategy {
 
 #[async_trait]
 impl AttackStrategy for FlatStrategy {
-    fn name(&self) -> AttackStrategyType {
-        AttackStrategyType::Flat
-    }
-    async fn run(self: Arc<Self>, args: &Args) {
-        for _wave in 0..args.waves_amount {
-            let (stop_tx, stop_rx) = watch::channel(false);
-            let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
-            interval.tick().await;
+    async fn run_connection_loop(
+        self: Arc<Self>,
+        config: &AttackConfig,
+        rx: Option<Receiver<bool>>,
+        i: u32,
+    ) {
+        let url = config.url_under_fire.clone();
 
-            // Creating independent timer
-            let timer = args.connection_duration;
-
-            // Spawning timer to cancell all threads
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(timer as u64)).await;
-                let _ = stop_tx.send(true);
-            });
-
-            // Creating connetctions
-            for i in 0..args.connections {
-                let strategy = Arc::clone(&self);
-                let rx = stop_rx.clone();
-
-                // Spawning threads for each connection
-                strategy.run_connection_loop(args, rx, i).await;
-            }
-            // Waves timer
-            tokio::time::sleep(Duration::from_secs(args.waves_pause as u64)).await;
-        }
-    }
-
-    async fn run_connection_loop(self: Arc<Self>, args: &Args, mut rx: Receiver<bool>, i: u32) {
-        let url = args.url.clone();
+        let mut rx = if let Some(rx) = rx {
+            rx
+        } else {
+            return;
+        };
 
         tokio::spawn(async move {
             match connect_async(&url).await {
@@ -266,32 +267,14 @@ impl AttackStrategy for FlatStrategy {
 
 #[async_trait]
 impl AttackStrategy for RampUpStrategy {
-    fn name(&self) -> AttackStrategyType {
-        AttackStrategyType::RampUp
-    }
-
-    async fn run(self: Arc<Self>, args: &Args) {
-        for _wave in 0..args.waves_amount {
-            //TODO - I need to get rid of this fake things (Option? - Isn't it a dirty way?)
-            let (_stop_tx, stop_rx) = watch::channel(false);
-
-            for i in 0..args.connections {
-                let strategy = Arc::clone(&self);
-                let stop_rx = stop_rx.clone();
-
-                strategy.run_connection_loop(args, stop_rx, i).await;
-                // New connection timer
-                tokio::time::sleep(Duration::from_millis(args.connection_pause as u64)).await;
-            }
-            // Waves timer
-            tokio::time::sleep(Duration::from_secs(args.waves_pause as u64)).await;
-        }
-    }
-
-    async fn run_connection_loop(self: Arc<Self>, args: &Args, _rx: Receiver<bool>, i: u32) {
-        let url = args.url.clone();
-
-        let mut interval = interval(Duration::from_secs(args.connection_duration as u64));
+    async fn run_connection_loop(
+        self: Arc<Self>,
+        config: &AttackConfig,
+        _rx: Option<Receiver<bool>>,
+        i: u32,
+    ) {
+        let url = config.url_under_fire.clone();
+        let mut interval = interval(Duration::from_secs(config.connection_duration));
         interval.tick().await;
 
         tokio::spawn(async move {

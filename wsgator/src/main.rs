@@ -12,31 +12,29 @@ struct Args {
     #[clap(short, long, value_enum, default_value_t = AttackStrategyType::Flat)]
     strategy: AttackStrategyType,
 
-    // Connections overalls
+    // Connections number
     #[arg(long, default_value = "100", value_parser = clap::value_parser!(u32).range(1..))]
-    connections: u32,
+    connection_number: u32,
 
-    #[clap(long, default_value = "30", value_parser = clap::value_parser!(u32).range(1..))]
-    connection_duration: u32,
+    #[clap(long, default_value = "30", value_parser = clap::value_parser!(u64).range(1..))]
+    connection_duration: u64,
 
-    #[clap(short, long, default_value = "20", value_parser = clap::value_parser!(u32).range(0..))]
-    connection_pause: u32,
+    #[clap(short, long, default_value = "20", value_parser = clap::value_parser!(u64).range(0..))]
+    connection_pause: u64,
 
     // Waves overall
     #[clap(long, default_value = "1", value_parser = clap::value_parser!(u32).range(1..))]
-    waves_amount: u32,
+    waves_number: u32,
 
-    #[arg(short, long, default_value = "0", value_parser = clap::value_parser!(u32).range(0..))]
-    waves_pause: u32,
+    #[arg(short, long, default_value = "0", value_parser = clap::value_parser!(u64).range(0..))]
+    waves_pause: u64,
 
     // Spam amount
-    #[arg(long, default_value = "100", value_parser = clap::value_parser!(u32).range(1..))]
-    spam_pause: u32,
+    #[arg(long, default_value = "100", value_parser = clap::value_parser!(u64).range(1..))]
+    spam_pause: u64,
 }
 
-fn get_strategy(
-    strategy_type: AttackStrategyType,
-) -> Arc<dyn AttackStrategy + Send + Sync + 'static> {
+fn get_strategy(strategy_type: AttackStrategyType) -> Arc<dyn AttackStrategy + Send + Sync> {
     match strategy_type {
         AttackStrategyType::Flat => Arc::new(FlatStrategy),
         AttackStrategyType::RampUp => Arc::new(RampUpStrategy),
@@ -49,7 +47,9 @@ async fn main() {
     let args = Args::parse();
 
     let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.strategy);
-    strategy.run(&args).await;
+    let config: AttackConfig = args.into();
+
+    strategy.run(&config).await;
 
     tokio::signal::ctrl_c().await.unwrap();
 }
