@@ -84,7 +84,7 @@ pub trait AttackStrategy {
 
                 // Pause between connections if applied
                 if let Some(connection_pause) = config.connection_pause {
-                    tokio::time::sleep(Duration::from_secs(connection_pause)).await;
+                    tokio::time::sleep(Duration::from_millis(connection_pause)).await;
                 }
             }
 
