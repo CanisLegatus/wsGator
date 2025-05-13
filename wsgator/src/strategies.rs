@@ -5,7 +5,7 @@ use futures::StreamExt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-use tokio::sync::watch::Receiver;
+use tokio::sync::watch::{Receiver, Sender};
 use tokio::time::interval;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -17,59 +17,27 @@ pub enum AttackStrategyType {
     Flood,
 }
 
-pub struct AttackConfig {
-    url_under_fire: String,
-    connection_number: u32,
-    connection_duration: u64,
-    connection_pause: Option<u64>,
-    waves_number: u32,
-    waves_pause: u64,
-    spam_pause: Option<u64>,
-    external_timer: Option<u64>,
-}
-
-impl From<Args> for AttackConfig {
-    fn from(value: Args) -> Self {
-        let (spam_pause, external_timer, connection_pause) = match value.strategy {
-            AttackStrategyType::Flat => (None, Some(value.connection_duration), None),
-            AttackStrategyType::RampUp => (None, None, Some(value.connection_pause)),
-            AttackStrategyType::Flood => (
-                Some(value.connection_pause),
-                Some(value.connection_duration),
-                None,
-            ),
-        };
-
-        AttackConfig {
-            url_under_fire: value.url,
-            connection_number: value.connection_number,
-            connection_duration: value.connection_duration,
-            connection_pause,
-            waves_number: value.waves_number,
-            waves_pause: value.waves_pause,
-            spam_pause,
-            external_timer,
-        }
-    }
-}
-
 #[async_trait]
 pub trait AttackStrategy {
+    fn get_common_config(&self) -> Arc<CommonConfig>;
     async fn run_connection_loop(
         self: Arc<Self>,
-        config: &AttackConfig,
-        stop_rx: Option<Receiver<bool>>,
+        rx: Option<Receiver<bool>>,
+        config: Arc<CommonConfig>,
         i: u32,
     );
-    async fn run(self: Arc<Self>, config: &AttackConfig) {
+    async fn run(self: Arc<Self>) {
+        let config = self.get_common_config();
+
         for _wave in 0..config.waves_number {
+            let con = Arc::clone(&config);
             // Creating independent watch_channel to stop all tasks extenally
             let mut watch_channel: Option<Receiver<bool>> = None;
-            if let Some(timer) = config.external_timer {
+            if let true = config.external_timer {
                 let (stop_tx, stop_rx) = watch::channel(false);
                 watch_channel = Some(stop_rx);
                 tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(timer)).await;
+                    tokio::time::sleep(Duration::from_secs(con.connection_duration)).await;
                     let _ = stop_tx.send(true);
                 });
             };
@@ -77,15 +45,15 @@ pub trait AttackStrategy {
             // Creating connections
             for i in 0..config.connection_number {
                 let strategy = Arc::clone(&self);
+                let con = Arc::clone(&config);
                 let rx = watch_channel.clone();
 
                 // Spawning thread for each connection
-                strategy.run_connection_loop(config, rx, i).await;
-
+                strategy.run_connection_loop(rx, con, i).await;
+                
+                // TODO! Warning - this feature was cropped! I need to reimplement
                 // Pause between connections if applied
-                if let Some(connection_pause) = config.connection_pause {
-                    tokio::time::sleep(Duration::from_millis(connection_pause)).await;
-                }
+                tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
             }
 
             // Waves delay timer
@@ -128,20 +96,62 @@ pub trait AttackStrategy {
     }
 }
 
-pub struct FlatStrategy;
-pub struct RampUpStrategy;
-pub struct FloodStrategy;
+#[derive(Clone)]
+pub struct CommonConfig {
+    pub url_under_fire: String,
+    pub connection_number: u32,
+    pub connection_duration: u64,
+    pub connection_pause: u64,
+    pub waves_number: u32,
+    pub waves_pause: u64,
+    pub external_timer: bool,
+}
+
+impl From<Args> for CommonConfig {
+    fn from(value: Args) -> Self {
+        Self {
+            url_under_fire: value.url.clone(),
+            connection_number: value.connection_number,
+            connection_duration: value.connection_duration,
+            connection_pause: value.connection_pause,
+            waves_number: value.waves_number,
+            waves_pause: value.waves_pause,
+            external_timer: false,
+        }
+    }
+}
+
+impl CommonConfig {
+    pub fn with_external_timer(mut self) -> Self {
+            self.external_timer = true;
+            self
+    }
+}
+
+pub struct FlatStrategy {
+    pub common_config: Arc<CommonConfig>,
+}
+pub struct RampUpStrategy {
+    pub common_config: Arc<CommonConfig>
+}
+pub struct FloodStrategy {
+    pub common_config: Arc<CommonConfig>,
+    pub spam_pause: u64,
+}
 
 #[async_trait]
 impl AttackStrategy for FloodStrategy {
+    fn get_common_config(&self) -> Arc<CommonConfig> {
+        self.common_config.clone()
+    }
     async fn run_connection_loop(
         self: Arc<Self>,
-        config: &AttackConfig,
         rx: Option<Receiver<bool>>,
+        config: Arc<CommonConfig>,
         i: u32,
     ) {
         let url = config.url_under_fire.clone();
-        let spam_pause = config.spam_pause.unwrap_or(100);
+        let spam_pause = self.spam_pause;
 
         let mut rx = if let Some(rx) = rx {
             rx
@@ -159,7 +169,7 @@ impl AttackStrategy for FloodStrategy {
                         println!("Connection {}: Can't send HELLO on connection: {}", i, e);
                         return;
                     }
-
+                    // This loop can be in .await func
                     // Main strategy logic loop
                     loop {
                         tokio::select! {
@@ -205,10 +215,13 @@ impl AttackStrategy for FloodStrategy {
 
 #[async_trait]
 impl AttackStrategy for FlatStrategy {
+    fn get_common_config(&self) -> Arc<CommonConfig> {
+        self.common_config.clone()
+    }
     async fn run_connection_loop(
         self: Arc<Self>,
-        config: &AttackConfig,
         rx: Option<Receiver<bool>>,
+        config: Arc<CommonConfig>,
         i: u32,
     ) {
         let url = config.url_under_fire.clone();
@@ -267,10 +280,13 @@ impl AttackStrategy for FlatStrategy {
 
 #[async_trait]
 impl AttackStrategy for RampUpStrategy {
+    fn get_common_config(&self) -> Arc<CommonConfig> {
+        self.common_config.clone()
+    }
     async fn run_connection_loop(
         self: Arc<Self>,
-        config: &AttackConfig,
         _rx: Option<Receiver<bool>>,
+        config: Arc<CommonConfig>,
         i: u32,
     ) {
         let url = config.url_under_fire.clone();

@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::sync::Arc;
+use strategies::AttackStrategyType;
 
 mod strategies;
 use strategies::*;
@@ -34,11 +35,22 @@ struct Args {
     spam_pause: u64,
 }
 
-fn get_strategy(strategy_type: AttackStrategyType) -> Arc<dyn AttackStrategy + Send + Sync> {
+fn get_strategy(
+    strategy_type: AttackStrategyType,
+    args: Args,
+) -> Arc<dyn AttackStrategy + Send + Sync> {
+
     match strategy_type {
-        AttackStrategyType::Flat => Arc::new(FlatStrategy),
-        AttackStrategyType::RampUp => Arc::new(RampUpStrategy),
-        AttackStrategyType::Flood => Arc::new(FloodStrategy),
+        AttackStrategyType::Flat => Arc::new(FlatStrategy {
+            common_config: Arc::new(CommonConfig::from(args).with_external_timer()),
+        }),
+        AttackStrategyType::RampUp => Arc::new(RampUpStrategy {
+            common_config: Arc::new(CommonConfig::from(args)),
+        }),
+        AttackStrategyType::Flood => Arc::new(FloodStrategy {
+            spam_pause: args.spam_pause,
+            common_config: Arc::new(CommonConfig::from(args).with_external_timer()),
+        }),
     }
 }
 
@@ -46,10 +58,8 @@ fn get_strategy(strategy_type: AttackStrategyType) -> Arc<dyn AttackStrategy + S
 async fn main() {
     let args = Args::parse();
 
-    let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.strategy);
-    let config: AttackConfig = args.into();
-
-    strategy.run(&config).await;
+    let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.strategy, args);
+    strategy.run().await;
 
     tokio::signal::ctrl_c().await.unwrap();
 }
