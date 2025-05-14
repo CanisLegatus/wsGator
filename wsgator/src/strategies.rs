@@ -52,14 +52,15 @@ pub trait AttackStrategy {
 
                 // Spawning thread for each connection
                 tasks.push(strategy.run_connection_loop(rx, con, i));
-
-                // TODO! Warning - this feature was cropped! I need to reimplement
-                // Pause between connections if applied
-                tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
             }
 
             // Waves logic
-            let _: Vec<_> = tasks.into_iter().map(tokio::spawn).collect();
+            
+            for task in tasks {
+                tokio::time::sleep(Duration::from_millis(0)).await;
+                tokio::spawn(task);
+            }
+
 
             // Waves delay timer
             tokio::time::sleep(Duration::from_secs(config.waves_pause)).await;
