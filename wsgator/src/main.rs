@@ -39,7 +39,6 @@ fn get_strategy(
     strategy_type: AttackStrategyType,
     args: Args,
 ) -> Arc<dyn AttackStrategy + Send + Sync> {
-
     match strategy_type {
         AttackStrategyType::Flat => Arc::new(FlatStrategy {
             common_config: Arc::new(CommonConfig::from(args).with_external_timer()),

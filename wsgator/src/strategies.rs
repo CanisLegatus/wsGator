@@ -2,11 +2,11 @@ use crate::Args;
 use async_trait::async_trait;
 use futures::SinkExt;
 use futures::StreamExt;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-use tokio::sync::watch::{Receiver, Sender};
-use tokio::time::interval;
+use tokio::sync::watch::Receiver;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 // Enumiration for TypeChecking while getting user input from CLI
@@ -20,12 +20,12 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy {
     fn get_common_config(&self) -> Arc<CommonConfig>;
-    async fn run_connection_loop(
+    fn run_connection_loop(
         self: Arc<Self>,
         rx: Option<Receiver<bool>>,
         config: Arc<CommonConfig>,
         i: u32,
-    );
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>;
     async fn run(self: Arc<Self>) {
         let config = self.get_common_config();
 
@@ -33,7 +33,7 @@ pub trait AttackStrategy {
             let con = Arc::clone(&config);
             // Creating independent watch_channel to stop all tasks extenally
             let mut watch_channel: Option<Receiver<bool>> = None;
-            if let true = config.external_timer {
+            if config.external_timer {
                 let (stop_tx, stop_rx) = watch::channel(false);
                 watch_channel = Some(stop_rx);
                 tokio::spawn(async move {
@@ -42,6 +42,8 @@ pub trait AttackStrategy {
                 });
             };
 
+            let mut tasks: Vec<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>> = vec![];
+
             // Creating connections
             for i in 0..config.connection_number {
                 let strategy = Arc::clone(&self);
@@ -49,12 +51,15 @@ pub trait AttackStrategy {
                 let rx = watch_channel.clone();
 
                 // Spawning thread for each connection
-                strategy.run_connection_loop(rx, con, i).await;
-                
+                tasks.push(strategy.run_connection_loop(rx, con, i));
+
                 // TODO! Warning - this feature was cropped! I need to reimplement
                 // Pause between connections if applied
                 tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
             }
+
+            // Waves logic
+            let _: Vec<_> = tasks.into_iter().map(tokio::spawn).collect();
 
             // Waves delay timer
             tokio::time::sleep(Duration::from_secs(config.waves_pause)).await;
@@ -123,8 +128,8 @@ impl From<Args> for CommonConfig {
 
 impl CommonConfig {
     pub fn with_external_timer(mut self) -> Self {
-            self.external_timer = true;
-            self
+        self.external_timer = true;
+        self
     }
 }
 
@@ -132,7 +137,7 @@ pub struct FlatStrategy {
     pub common_config: Arc<CommonConfig>,
 }
 pub struct RampUpStrategy {
-    pub common_config: Arc<CommonConfig>
+    pub common_config: Arc<CommonConfig>,
 }
 pub struct FloodStrategy {
     pub common_config: Arc<CommonConfig>,
@@ -144,22 +149,21 @@ impl AttackStrategy for FloodStrategy {
     fn get_common_config(&self) -> Arc<CommonConfig> {
         self.common_config.clone()
     }
-    async fn run_connection_loop(
+    fn run_connection_loop(
         self: Arc<Self>,
         rx: Option<Receiver<bool>>,
         config: Arc<CommonConfig>,
         i: u32,
-    ) {
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>> {
         let url = config.url_under_fire.clone();
         let spam_pause = self.spam_pause;
 
-        let mut rx = if let Some(rx) = rx {
-            rx
-        } else {
-            return;
-        };
+        Box::pin(async move {
+            let mut rx = match rx {
+                Some(rx) => rx,
+                None => return,
+            };
 
-        tokio::spawn(async move {
             match connect_async(&url).await {
                 Ok((mut ws, _)) => {
                     if let Err(e) = ws
@@ -209,7 +213,7 @@ impl AttackStrategy for FloodStrategy {
                     println!("Connection {}: Error on WS connection: {}", i, e);
                 }
             }
-        });
+        })
     }
 }
 
@@ -218,21 +222,20 @@ impl AttackStrategy for FlatStrategy {
     fn get_common_config(&self) -> Arc<CommonConfig> {
         self.common_config.clone()
     }
-    async fn run_connection_loop(
+    fn run_connection_loop(
         self: Arc<Self>,
         rx: Option<Receiver<bool>>,
         config: Arc<CommonConfig>,
         i: u32,
-    ) {
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>> {
         let url = config.url_under_fire.clone();
 
-        let mut rx = if let Some(rx) = rx {
-            rx
-        } else {
-            return;
-        };
+        Box::pin(async move {
+            let mut rx = match rx {
+                Some(rx) => rx,
+                None => return,
+            };
 
-        tokio::spawn(async move {
             match connect_async(&url).await {
                 Ok((mut ws, _)) => {
                     if let Err(e) = ws
@@ -274,7 +277,7 @@ impl AttackStrategy for FlatStrategy {
                     println!("Connection {}: Error on WS connection: {}", i, e);
                 }
             }
-        });
+        })
     }
 }
 
@@ -283,17 +286,22 @@ impl AttackStrategy for RampUpStrategy {
     fn get_common_config(&self) -> Arc<CommonConfig> {
         self.common_config.clone()
     }
-    async fn run_connection_loop(
+    fn run_connection_loop(
         self: Arc<Self>,
-        _rx: Option<Receiver<bool>>,
+        rx: Option<Receiver<bool>>,
         config: Arc<CommonConfig>,
         i: u32,
-    ) {
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>> {
         let url = config.url_under_fire.clone();
-        let mut interval = interval(Duration::from_secs(config.connection_duration));
-        interval.tick().await;
+        //let mut interval = interval(Duration::from_secs(config.connection_duration));
+        //interval.tick().await;
 
-        tokio::spawn(async move {
+        Box::pin(async move {
+            let mut rx = match rx {
+                Some(rx) => rx,
+                None => return,
+            };
+
             match connect_async(&url).await {
                 Ok((mut ws, _)) => {
                     if let Err(e) = ws
@@ -322,7 +330,7 @@ impl AttackStrategy for RampUpStrategy {
                                 }
                             },
 
-                            _ = interval.tick() => {
+                            _ = rx.changed() => {
                                 println!("Connection {}: Reached its target time. Sending Close Frame", i);
 
                                 if let Err(e) = ws.send(Message::Close(None)).await {
@@ -337,6 +345,6 @@ impl AttackStrategy for RampUpStrategy {
                     println!("Connection {}: Error on WS connection: {}", i, e);
                 }
             }
-        });
+        })
     }
 }
