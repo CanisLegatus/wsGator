@@ -58,7 +58,7 @@ async fn main() {
     let args = Args::parse();
 
     let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.strategy, args);
-    strategy.run().await;
+    let _ = strategy.run().await;
 
     tokio::signal::ctrl_c().await.unwrap();
 }
