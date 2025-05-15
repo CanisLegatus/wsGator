@@ -33,13 +33,15 @@ pub trait AttackStrategy {
             let con = Arc::clone(&config);
             // Creating independent watch_channel to stop all tasks extenally
             let mut watch_channel: Option<Receiver<bool>> = None;
-            if config.external_timer {
+            let timer_task = if config.external_timer {
                 let (stop_tx, stop_rx) = watch::channel(false);
                 watch_channel = Some(stop_rx);
-                tokio::spawn(async move {
+                Some(Box::pin(async move {
                     tokio::time::sleep(Duration::from_secs(con.connection_duration)).await;
                     let _ = stop_tx.send(true);
-                });
+                }))
+            } else {
+                None
             };
 
             let mut tasks: Vec<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>> = vec![];
@@ -55,12 +57,15 @@ pub trait AttackStrategy {
             }
 
             // Waves logic
-            
+            // Spawning collected tasks
             for task in tasks {
-                tokio::time::sleep(Duration::from_millis(0)).await;
+                tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
                 tokio::spawn(task);
             }
-
+            
+            if let Some(timer_task) = timer_task {
+                tokio::spawn(timer_task);
+            }
 
             // Waves delay timer
             tokio::time::sleep(Duration::from_secs(config.waves_pause)).await;

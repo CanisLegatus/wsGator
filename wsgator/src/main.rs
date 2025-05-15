@@ -20,7 +20,7 @@ struct Args {
     #[clap(long, default_value = "30", value_parser = clap::value_parser!(u64).range(1..))]
     connection_duration: u64,
 
-    #[clap(short, long, default_value = "20", value_parser = clap::value_parser!(u64).range(0..))]
+    #[clap(short, long, default_value = "0", value_parser = clap::value_parser!(u64).range(0..))]
     connection_pause: u64,
 
     // Waves overall
