@@ -6,12 +6,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::watch;
 use tokio::sync::watch::Receiver;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+
 // Enumiration for TypeChecking while getting user input from CLI
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum AttackStrategyType {
@@ -36,62 +36,6 @@ pub trait AttackStrategy {
     ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, WsError> {
         let (ws, _) = connect_async(url).await?;
         Ok(ws)
-    }
-    async fn run(self: Arc<Self>) -> Result<(), WsError> {
-        let config = self.get_common_config();
-
-        for _wave in 0..config.waves_number {
-            let con = Arc::clone(&config);
-            // Creating independent watch_channel to stop all tasks extenally
-            let mut watch_channel: Option<Receiver<bool>> = None;
-            let timer_task = if config.external_timer {
-                let (stop_tx, stop_rx) = watch::channel(false);
-                watch_channel = Some(stop_rx);
-                Some(Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(con.connection_duration)).await;
-                    let _ = stop_tx.send(true);
-                }))
-            } else {
-                None
-            };
-
-            let mut tasks: Vec<
-                Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + 'static>>,
-            > = vec![];
-
-            // Creating connections
-            for i in 0..config.connection_number {
-                let strategy = Arc::clone(&self);
-                let con = Arc::clone(&config);
-                let rx = watch_channel.clone();
-
-                // Getting websocket connection
-                let mut ws = self.get_ws_connection(&con.url_under_fire).await?;
-
-                // Saying hello to connection
-                ws.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
-                    .await?;
-
-                // Spawning thread for each connection
-                tasks.push(strategy.run_connection_loop(ws, rx, con, i));
-            }
-
-            // Waves logic //
-            // Spawning collected tasks
-            for task in tasks {
-                tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
-                tokio::spawn(task);
-            }
-
-            // Spawning timer
-            if let Some(timer_task) = timer_task {
-                tokio::spawn(timer_task);
-            }
-
-            // Waves delay timer
-            tokio::time::sleep(Duration::from_secs(config.waves_pause)).await;
-        }
-        Ok(())
     }
 
     fn handle_messages(

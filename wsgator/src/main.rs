@@ -2,7 +2,12 @@ use clap::Parser;
 use std::sync::Arc;
 use strategies::AttackStrategyType;
 
+mod error_log;
+mod executor;
 mod strategies;
+
+use error_log::*;
+use executor::*;
 use strategies::*;
 
 #[derive(Parser)]
@@ -36,10 +41,9 @@ struct Args {
 }
 
 fn get_strategy(
-    strategy_type: AttackStrategyType,
     args: Args,
 ) -> Arc<dyn AttackStrategy + Send + Sync> {
-    match strategy_type {
+    match args.strategy {
         AttackStrategyType::Flat => Arc::new(FlatStrategy {
             common_config: Arc::new(CommonConfig::from(args).with_external_timer()),
         }),
@@ -56,9 +60,10 @@ fn get_strategy(
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-
-    let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.strategy, args);
-    let _ = strategy.run().await;
+    let error_log = ErrorLog::new();
+    let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args);
+    let executor = Executor;
+    let _ = executor.run(strategy).await;
 
     tokio::signal::ctrl_c().await.unwrap();
 }
