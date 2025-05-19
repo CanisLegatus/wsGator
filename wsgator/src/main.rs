@@ -1,20 +1,17 @@
-use std::sync::Arc;
 use clap::Parser;
+use std::sync::Arc;
 
-
+mod configs;
 mod core;
 mod strategy_core;
-mod configs;
 
 use configs::cmd_args::*;
+use configs::common_config::*;
 use core::error_log::*;
 use core::executor::*;
-use strategy_core::{ strategy::*, flat_strategy::*, flood_strategy::*, ramp_up_strategy::*};
-use configs::common_config::*;
+use strategy_core::{flat_strategy::*, flood_strategy::*, ramp_up_strategy::*, strategy::*};
 
-fn get_strategy(
-    args: Args,
-) -> Arc<dyn AttackStrategy + Send + Sync> {
+fn get_strategy(args: Args) -> Arc<dyn AttackStrategy + Send + Sync> {
     match args.strategy {
         AttackStrategyType::Flat => Arc::new(FlatStrategy {
             common_config: Arc::new(CommonConfig::from(args).with_external_timer()),

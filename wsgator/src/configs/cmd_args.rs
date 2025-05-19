@@ -1,5 +1,5 @@
-use clap::Parser;
 use crate::AttackStrategyType;
+use clap::Parser;
 
 #[derive(Parser)]
 pub struct Args {

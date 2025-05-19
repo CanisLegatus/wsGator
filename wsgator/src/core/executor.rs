@@ -8,14 +8,13 @@ use tokio::time::Duration;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 pub struct Executor;
-use tokio_tungstenite::WebSocketStream;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
+use tokio_tungstenite::WebSocketStream;
 
 type ConnectionTaskFuture = Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + 'static>>;
 
 impl Executor {
-
     async fn get_ws_connection(
         &self,
         url: &str,
@@ -24,20 +23,30 @@ impl Executor {
         Ok(ws)
     }
 
-    pub fn get_timer_task(config: Arc<CommonConfig>) -> (Option<Receiver<bool>>, Option<Pin<Box<impl Future<Output = ()>>>>) {
-            if config.external_timer {
-                let (stop_tx, stop_rx) = watch::channel(false);
-                let task = Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
-                    let _ = stop_tx.send(true);
-                });
-                (Some(stop_rx), Some(task))
-            } else {
-                (None, None) 
-            }
+    pub fn get_timer_task(
+        config: Arc<CommonConfig>,
+    ) -> (
+        Option<Receiver<bool>>,
+        Option<Pin<Box<impl Future<Output = ()>>>>,
+    ) {
+        if config.external_timer {
+            let (stop_tx, stop_rx) = watch::channel(false);
+            let task = Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
+                let _ = stop_tx.send(true);
+            });
+            (Some(stop_rx), Some(task))
+        } else {
+            (None, None)
+        }
     }
 
-    pub async fn get_connections(&self, strategy: Arc<dyn AttackStrategy + Send>, config: Arc<CommonConfig>, watch_channel: Option<Receiver<bool>>) -> Result<Vec<ConnectionTaskFuture>, WsError> {    
+    pub async fn get_connections(
+        &self,
+        strategy: Arc<dyn AttackStrategy + Send>,
+        config: Arc<CommonConfig>,
+        watch_channel: Option<Receiver<bool>>,
+    ) -> Result<Vec<ConnectionTaskFuture>, WsError> {
         let mut tasks: Vec<ConnectionTaskFuture> = vec![];
 
         // Creating connections
@@ -70,7 +79,9 @@ impl Executor {
 
             // Creating independent watch_channel to stop all tasks extenally
             let (watch_channel, timer_task) = Self::get_timer_task(con);
-            let tasks = self.get_connections(strategy.clone(), config.clone(), watch_channel).await?;
+            let tasks = self
+                .get_connections(strategy.clone(), config.clone(), watch_channel)
+                .await?;
 
             // Waves logic
             // Spawning collected tasks

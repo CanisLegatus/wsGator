@@ -1,14 +1,14 @@
-use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::watch::Receiver;
-use tokio_tungstenite::MaybeTlsStream;
-use std::pin::Pin;
 use crate::AttackStrategy;
 use crate::CommonConfig;
-use tokio_tungstenite::WebSocketStream;
-use tokio::net::TcpStream;
-use futures::StreamExt;
+use async_trait::async_trait;
 use futures::SinkExt;
+use futures::StreamExt;
+use std::pin::Pin;
+use std::sync::Arc;
+use tokio::net::TcpStream;
+use tokio::sync::watch::Receiver;
+use tokio_tungstenite::MaybeTlsStream;
+use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -28,7 +28,7 @@ impl AttackStrategy for FlatStrategy {
         rx: Option<Receiver<bool>>,
         _config: Arc<CommonConfig>,
         i: u32,
-    ) -> Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + Sync + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + 'static>> {
         Box::pin(async move {
             let mut rx = match rx {
                 Some(rx) => rx,
@@ -37,17 +37,8 @@ impl AttackStrategy for FlatStrategy {
             // Connection loop
             loop {
                 tokio::select! {
-                    msg = ws.next() => {
-                        let (proceed, message) = self.handle_messages(msg, i);
 
-                        if let Some(message) = message {
-                            ws.send(message).await?;
-                        }
-
-                        if !proceed {
-                            break Ok(());
-                        }
-                    },
+                    result = self.handle_base_events(ws, i) => {},
 
                     _ = rx.changed() => {
                         println!("Connection {}: Reached its target time. Sending Close Frame", i);
