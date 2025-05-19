@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use clap::Parser;
 
+
 mod core;
 mod strategy_core;
 mod configs;
@@ -8,9 +9,8 @@ mod configs;
 use configs::cmd_args::*;
 use core::error_log::*;
 use core::executor::*;
-use strategy_core::strategies::*;
-
-
+use strategy_core::{ strategy::*, flat_strategy::*, flood_strategy::*, ramp_up_strategy::*};
+use configs::common_config::*;
 
 fn get_strategy(
     args: Args,

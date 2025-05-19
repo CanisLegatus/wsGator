@@ -1,6 +1,5 @@
 use crate::AttackStrategy;
 use futures::SinkExt;
-use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -9,10 +8,22 @@ use tokio::time::Duration;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 pub struct Executor;
+use tokio_tungstenite::WebSocketStream;
+use tokio::net::TcpStream;
+use tokio_tungstenite::MaybeTlsStream;
 
 type ConnectionTaskFuture = Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + 'static>>;
 
 impl Executor {
+
+    async fn get_ws_connection(
+        &self,
+        url: &str,
+    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, WsError> {
+        let (ws, _) = connect_async(url).await?;
+        Ok(ws)
+    }
+
     pub async fn run(
         &self,
         strategy: Arc<dyn AttackStrategy + Send + Sync>,
@@ -43,7 +54,7 @@ impl Executor {
                 let rx = watch_channel.clone();
 
                 // Getting websocket connection
-                let mut ws = strategy.get_ws_connection(&con.url_under_fire).await?;
+                let mut ws = self.get_ws_connection(&con.url_under_fire).await?;
 
                 // Saying hello to connection
                 ws.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
