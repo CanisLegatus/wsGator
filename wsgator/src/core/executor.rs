@@ -1,4 +1,4 @@
-use crate::AttackStrategy;
+use crate::{AttackStrategy, CommonConfig};
 use futures::SinkExt;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -24,6 +24,41 @@ impl Executor {
         Ok(ws)
     }
 
+    pub fn get_timer_task(config: Arc<CommonConfig>) -> (Option<Receiver<bool>>, Option<Pin<Box<impl Future<Output = ()>>>>) {
+            if config.external_timer {
+                let (stop_tx, stop_rx) = watch::channel(false);
+                let task = Box::pin(async move {
+                    tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
+                    let _ = stop_tx.send(true);
+                });
+                (Some(stop_rx), Some(task))
+            } else {
+                (None, None) 
+            }
+    }
+
+    pub async fn get_connections(&self, strategy: Arc<dyn AttackStrategy + Send>, config: Arc<CommonConfig>, watch_channel: Option<Receiver<bool>>) -> Result<Vec<ConnectionTaskFuture>, WsError> {    
+        let mut tasks: Vec<ConnectionTaskFuture> = vec![];
+
+        // Creating connections
+        for i in 0..config.connection_number {
+            let strategy = Arc::clone(&strategy);
+            let con = Arc::clone(&config);
+            let rx = watch_channel.clone();
+
+            // Getting websocket connection
+            let mut ws = self.get_ws_connection(&con.url_under_fire).await?;
+
+            // Saying hello to connection
+            ws.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
+                .await?;
+
+            // Spawning thread for each connection
+            tasks.push(strategy.run_connection_loop(ws, rx, con, i));
+        }
+        Ok(tasks)
+    }
+
     pub async fn run(
         &self,
         strategy: Arc<dyn AttackStrategy + Send + Sync>,
@@ -32,39 +67,12 @@ impl Executor {
 
         for _wave in 0..config.waves_number {
             let con = Arc::clone(&config);
+
             // Creating independent watch_channel to stop all tasks extenally
-            let mut watch_channel: Option<Receiver<bool>> = None;
-            let timer_task = if config.external_timer {
-                let (stop_tx, stop_rx) = watch::channel(false);
-                watch_channel = Some(stop_rx);
-                Some(Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(con.connection_duration)).await;
-                    let _ = stop_tx.send(true);
-                }))
-            } else {
-                None
-            };
+            let (watch_channel, timer_task) = Self::get_timer_task(con);
+            let tasks = self.get_connections(strategy.clone(), config.clone(), watch_channel).await?;
 
-            let mut tasks: Vec<ConnectionTaskFuture> = vec![];
-
-            // Creating connections
-            for i in 0..config.connection_number {
-                let strategy = Arc::clone(&strategy);
-                let con = Arc::clone(&config);
-                let rx = watch_channel.clone();
-
-                // Getting websocket connection
-                let mut ws = self.get_ws_connection(&con.url_under_fire).await?;
-
-                // Saying hello to connection
-                ws.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
-                    .await?;
-
-                // Spawning thread for each connection
-                tasks.push(strategy.run_connection_loop(ws, rx, con, i));
-            }
-
-            // Waves logic //
+            // Waves logic
             // Spawning collected tasks
             for task in tasks {
                 tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
