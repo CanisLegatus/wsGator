@@ -2,14 +2,15 @@ use crate::AttackStrategy;
 use crate::CommonConfig;
 use async_trait::async_trait;
 use futures::SinkExt;
-use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::watch::Receiver;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
+use tokio::sync::mpsc::Sender as MpscSender;
+use tokio::sync::watch::Receiver as WatchReceiver;
+use futures::stream::SplitStream;
 
 use tokio_tungstenite::tungstenite::Error as WsError;
 
@@ -24,9 +25,11 @@ impl AttackStrategy for RampUpStrategy {
     }
     fn run_connection_loop(
         self: Arc<Self>,
-        mut ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
-        rx: Option<Receiver<bool>>,
-        _config: Arc<CommonConfig>,
+        stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+        stop_signal_receiver: WatchReceiver<Message>, 
+        message_writer_sender: MpscSender<Message>,
+        rx: Option<WatchReceiver<bool>>,
+        config: Arc<CommonConfig>,
         i: u32,
     ) -> Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + 'static>> {
         //let mut interval = interval(Duration::from_secs(config.connection_duration));

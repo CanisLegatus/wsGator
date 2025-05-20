@@ -1,15 +1,17 @@
 use crate::CommonConfig;
 use async_trait::async_trait;
+use futures::SinkExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::watch::Receiver;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use futures::StreamExt;
-use futures::SinkExt;
-
+use futures::stream::SplitSink;
+use tokio::sync::mpsc::{Sender as MpscSender, Receiver as MpscReceiver};
+use tokio::sync::watch::Receiver as WatchReceiver;
+use futures::stream::SplitStream;
 use tokio_tungstenite::tungstenite::Error as WsError;
 
 // Enumiration for TypeChecking while getting user input from CLI
@@ -21,24 +23,40 @@ pub enum AttackStrategyType {
 }
 
 #[async_trait]
-pub trait AttackStrategy {
+pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
     fn run_connection_loop(
         self: Arc<Self>,
-        ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
-        rx: Option<Receiver<bool>>,
+        stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+        stop_rx: Option<WatchReceiver<bool>>, 
+        writer_tx: MpscSender<Message>,
         config: Arc<CommonConfig>,
         i: u32,
     ) -> Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + 'static>>;
     
-    async fn handle_base_events(&self, mut ws: WebSocketStream<MaybeTlsStream<TcpStream>>, i: u32) -> Result<bool, WsError> {
-                        
+    async fn run_writer(&self, mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>, mut writer_rx: MpscReceiver<Message>) -> Result<(), WsError> {
+        
+        tokio::spawn(
+            async move {
+                loop {
+                    tokio::select! {
+                        opt_message = writer_rx.recv() => {
+                            sink.send(message).await;
+                        }
+                    }
+                }
+            }
+        );
 
-        if let Some(msg) = ws.next().await {
+        Ok(())
+    }
+
+    async fn handle_base_events(&self, mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>, writer_tx: MpscSender<Message>, i: u32) -> Result<bool, WsError> {
+        if let Some(msg) = stream.next().await {
             let (proceed, message) = self.handle_messages(msg, i);
 
             if let Some(message) = message {
-                ws.send(message).await?;
+                writer_tx.send(message);
             }
             
             if !proceed {
