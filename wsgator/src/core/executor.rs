@@ -12,8 +12,10 @@ pub struct Executor;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use tokio::sync::mpsc::Receiver as MpscReceiver;
+use futures::stream::SplitSink;
 
-type ConnectionTaskFuture = Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + 'static>>;
+type ConnectionTaskFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
 impl Executor {
     async fn get_ws_connection(
@@ -23,7 +25,26 @@ impl Executor {
         let (ws, _) = connect_async(url).await?;
         Ok(ws)
     }
-
+    async fn get_writer(
+        &self,
+        mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+        mut writer_rx: MpscReceiver<Message>,
+        mut stop_rx: WatchReceiver<bool>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async move {
+            loop {
+                tokio::select! {
+                    opt_message = writer_rx.recv() => {
+                        match opt_message {
+                            Some(message) => { sink.send(message).await; },
+                            None => { break; }
+                        }
+                    },
+                    _= stop_rx.changed() => { break; }
+                }
+            }
+        })
+    }
     pub fn get_timer_task(
         config: Arc<CommonConfig>,
     ) -> (WatchReceiver<bool>, Pin<Box<impl Future<Output = ()>>>) {
@@ -57,11 +78,13 @@ impl Executor {
             // Saying hello to connection
             sink.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
                 .await?;
-
-            let _ = strategy.get_writer(sink, writer_rx, stop_rx.clone()).await;
-
+            
+            // Creating writer task for connection
+            let writer_task = self.get_writer(sink, writer_rx, stop_rx.clone()).await;
+            tokio::spawn(writer_task);
+            let task = strategy.get_task(stream, stop_rx.clone(), writer_tx, con, i);
             // Spawning thread for each connection
-            tasks.push(strategy.run_connection_loop(stream, stop_rx.clone(), writer_tx, con, i));
+            tasks.push(task);
         }
         Ok(tasks)
     }
