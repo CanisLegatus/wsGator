@@ -1,8 +1,8 @@
 use crate::{AttackStrategy, CommonConfig};
-use tokio::sync::mpsc;
 use futures::{SinkExt, StreamExt};
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::time::Duration;
@@ -26,27 +26,20 @@ impl Executor {
 
     pub fn get_timer_task(
         config: Arc<CommonConfig>,
-    ) -> (
-        Option<WatchReceiver<bool>>,
-        Option<Pin<Box<impl Future<Output = ()>>>>,
-    ) {
-        if config.external_timer {
-            let (stop_tx, stop_rx) = watch::channel(false);
-            let task = Box::pin(async move {
-                tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
-                let _ = stop_tx.send(true);
-            });
-            (Some(stop_rx), Some(task))
-        } else {
-            (None, None)
-        }
+    ) -> (WatchReceiver<bool>, Pin<Box<impl Future<Output = ()>>>) {
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let task = Box::pin(async move {
+            tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
+            let _ = stop_tx.send(true);
+        });
+        (stop_rx, task)
     }
 
     pub async fn get_connections(
         &self,
         strategy: Arc<dyn AttackStrategy + Send>,
         config: Arc<CommonConfig>,
-        watch_channel: Option<WatchReceiver<bool>>,
+        stop_rx: WatchReceiver<bool>,
     ) -> Result<Vec<ConnectionTaskFuture>, WsError> {
         let mut tasks: Vec<ConnectionTaskFuture> = vec![];
 
@@ -54,23 +47,21 @@ impl Executor {
         for i in 0..config.connection_number {
             let strategy = Arc::clone(&strategy);
             let con = Arc::clone(&config);
-            let stop_rx = watch_channel.clone();
-
             // Getting websocket connection
             let ws = self.get_ws_connection(&con.url_under_fire).await?;
             let (mut sink, stream) = ws.split();
-            
+
             // Getting mpsc task to send messages to writer
-            let (writer_tx, writer_rx) = mpsc::channel::<Message>(8);
+            let (writer_tx, writer_rx) = mpsc::channel::<Message>(32);
 
             // Saying hello to connection
             sink.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
                 .await?;
-            
-            strategy.run_writer(sink, writer_rx).await;
+
+            let _ = strategy.get_writer(sink, writer_rx, stop_rx.clone()).await;
 
             // Spawning thread for each connection
-            tasks.push(strategy.run_connection_loop(stream, stop_rx, writer_tx, con, i));
+            tasks.push(strategy.run_connection_loop(stream, stop_rx.clone(), writer_tx, con, i));
         }
         Ok(tasks)
     }
@@ -98,9 +89,7 @@ impl Executor {
             }
 
             // Spawning timer
-            if let Some(timer_task) = timer_task {
-                tokio::spawn(timer_task);
-            }
+            tokio::spawn(timer_task);
 
             // Waves delay timer
             tokio::time::sleep(Duration::from_secs(config.waves_pause)).await;

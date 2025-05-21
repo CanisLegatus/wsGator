@@ -1,18 +1,18 @@
 use crate::CommonConfig;
 use async_trait::async_trait;
 use futures::SinkExt;
+use futures::StreamExt;
+use futures::stream::SplitSink;
+use futures::stream::SplitStream;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender};
+use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
-use futures::StreamExt;
-use futures::stream::SplitSink;
-use tokio::sync::mpsc::{Sender as MpscSender, Receiver as MpscReceiver};
-use tokio::sync::watch::Receiver as WatchReceiver;
-use futures::stream::SplitStream;
 use tokio_tungstenite::tungstenite::Error as WsError;
+use tokio_tungstenite::tungstenite::Message;
 
 // Enumiration for TypeChecking while getting user input from CLI
 #[derive(clap::ValueEnum, Clone, Copy)]
@@ -28,37 +28,48 @@ pub trait AttackStrategy: Send + Sync {
     fn run_connection_loop(
         self: Arc<Self>,
         stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-        stop_rx: Option<WatchReceiver<bool>>, 
+        stop_rx: WatchReceiver<bool>,
         writer_tx: MpscSender<Message>,
         config: Arc<CommonConfig>,
         i: u32,
     ) -> Pin<Box<dyn Future<Output = Result<(), WsError>> + Send + 'static>>;
-    
-    async fn run_writer(&self, mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>, mut writer_rx: MpscReceiver<Message>) -> Result<(), WsError> {
-        
-        tokio::spawn(
-            async move {
-                loop {
-                    tokio::select! {
-                        opt_message = writer_rx.recv() => {
-                            sink.send(message).await;
+
+    async fn get_writer(
+        &self,
+        mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+        mut writer_rx: MpscReceiver<Message>,
+        mut stop_rx: WatchReceiver<bool>,
+    ) -> Result<(), WsError> {
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    opt_message = writer_rx.recv() => {
+                        match opt_message {
+                            Some(message) => { sink.send(message).await; },
+                            None => {}
                         }
-                    }
+                    },
+                    _= stop_rx.changed() => { break; }
                 }
             }
-        );
+        });
 
         Ok(())
     }
 
-    async fn handle_base_events(&self, mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>, writer_tx: MpscSender<Message>, i: u32) -> Result<bool, WsError> {
+    async fn handle_base_events(
+        &self,
+        mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+        writer_tx: MpscSender<Message>,
+        i: u32,
+    ) -> Result<bool, WsError> {
         if let Some(msg) = stream.next().await {
             let (proceed, message) = self.handle_messages(msg, i);
 
             if let Some(message) = message {
                 writer_tx.send(message);
             }
-            
+
             if !proceed {
                 return Ok(false);
             } else {
