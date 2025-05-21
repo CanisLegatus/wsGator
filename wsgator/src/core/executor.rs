@@ -1,8 +1,7 @@
 use crate::{AttackStrategy, CommonConfig};
-use futures::{SinkExt, StreamExt};
+use futures::SinkExt;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::time::Duration;
@@ -12,9 +11,6 @@ pub struct Executor;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio::sync::mpsc::Receiver as MpscReceiver;
-use futures::stream::SplitSink;
-
 type ConnectionTaskFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
 impl Executor {
@@ -25,26 +21,7 @@ impl Executor {
         let (ws, _) = connect_async(url).await?;
         Ok(ws)
     }
-    async fn get_writer(
-        &self,
-        mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-        mut writer_rx: MpscReceiver<Message>,
-        mut stop_rx: WatchReceiver<bool>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        Box::pin(async move {
-            loop {
-                tokio::select! {
-                    opt_message = writer_rx.recv() => {
-                        match opt_message {
-                            Some(message) => { sink.send(message).await; },
-                            None => { break; }
-                        }
-                    },
-                    _= stop_rx.changed() => { break; }
-                }
-            }
-        })
-    }
+
     pub fn get_timer_task(
         config: Arc<CommonConfig>,
     ) -> (WatchReceiver<bool>, Pin<Box<impl Future<Output = ()>>>) {
@@ -69,21 +46,14 @@ impl Executor {
             let strategy = Arc::clone(&strategy);
             let con = Arc::clone(&config);
             // Getting websocket connection
-            let ws = self.get_ws_connection(&con.url_under_fire).await?;
-            let (mut sink, stream) = ws.split();
-
-            // Getting mpsc task to send messages to writer
-            let (writer_tx, writer_rx) = mpsc::channel::<Message>(32);
+            let mut ws = self.get_ws_connection(&con.url_under_fire).await?;
 
             // Saying hello to connection
-            sink.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
+            ws.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
                 .await?;
-            
+
             // Creating writer task for connection
-            let writer_task = self.get_writer(sink, writer_rx, stop_rx.clone()).await;
-            tokio::spawn(writer_task);
-            let task = strategy.get_task(stream, stop_rx.clone(), writer_tx, con, i);
-            // Spawning thread for each connection
+            let task = strategy.get_task(ws, stop_rx.clone(), i);
             tasks.push(task);
         }
         Ok(tasks)

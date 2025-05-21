@@ -1,11 +1,15 @@
 use crate::CommonConfig;
 use async_trait::async_trait;
-use futures::future;
+use futures::SinkExt;
 use futures::StreamExt;
+use futures::future;
+use futures::stream::SplitSink;
 use futures::stream::SplitStream;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Receiver as MpscReceiver;
 use tokio::sync::mpsc::Sender as MpscSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::MaybeTlsStream;
@@ -28,30 +32,55 @@ pub trait AttackStrategy: Send + Sync {
         Box::pin(future::pending())
     }
 
-    fn get_task(self: Arc<Self>,
-        mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    async fn get_writer(
+        self: Arc<Self>,
+        mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+        mut writer_rx: MpscReceiver<Message>,
         mut stop_rx: WatchReceiver<bool>,
-        writer_tx: MpscSender<Message>,
-        config: Arc<CommonConfig>,
-        i: u32
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
-    where 
-        Self: 'static {
-        Box::pin(
-            async move {
-                loop{
-                    tokio::select! {
-                        _ = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => {}
-                        _ = self.handle_special_events() => {}
-                        _ = stop_rx.changed() => {
-                            println!("Connection {}: Reached its target time. Sending Close Frame", i);
-                            let _ = writer_tx.send(Message::Close(None)).await;
-                            break;
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async move {
+            loop {
+                tokio::select! {
+                    opt_message = writer_rx.recv() => {
+                        match opt_message {
+                            Some(message) => { sink.send(message).await; },
+                            None => { break; }
                         }
+                    },
+                    _= stop_rx.changed() => { break; }
+                }
+            }
+        })
+    }
+
+    fn get_task(
+        self: Arc<Self>,
+        ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+        mut stop_rx: WatchReceiver<bool>,
+        i: u32,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+    where
+        Self: 'static,
+    {
+        Box::pin(async move {
+            let (sink, mut stream) = ws.split();
+            let (writer_tx, writer_rx) = mpsc::channel::<Message>(32);
+            let writer = self.clone().get_writer(sink, writer_rx, stop_rx.clone());
+
+            tokio::spawn(writer);
+
+            loop {
+                tokio::select! {
+                    _ = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => {}
+                    _ = self.handle_special_events() => {}
+                    _ = stop_rx.changed() => {
+                        println!("Connection {}: Reached its target time. Sending Close Frame", i);
+                        let _ = writer_tx.send(Message::Close(None)).await;
+                        break;
                     }
                 }
             }
-        )
+        })
     }
 
     async fn handle_base_events(
@@ -60,12 +89,10 @@ pub trait AttackStrategy: Send + Sync {
         writer_tx: MpscSender<Message>,
         i: u32,
     ) -> Result<bool, WsError> {
-
         if let Some(msg) = stream.next().await {
             let (proceed, message) = self.handle_messages(msg, i);
 
             if let Some(message) = message {
-                println!("Recieved Some(MSG!)");
                 writer_tx.send(message).await;
             }
 
