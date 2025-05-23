@@ -1,4 +1,6 @@
 use crate::{AttackStrategy, CommonConfig};
+use futures::stream;
+use futures::stream::StreamExt;
 use futures::SinkExt;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -39,23 +41,39 @@ impl Executor {
         config: Arc<CommonConfig>,
         stop_rx: WatchReceiver<bool>,
     ) -> Result<Vec<ConnectionTaskFuture>, WsError> {
-        let mut tasks: Vec<ConnectionTaskFuture> = vec![];
+        
+        let tasks: Vec<ConnectionTaskFuture> = stream::iter(0..config.connection_number)
+            .map(| i | {
+                let strategy = Arc::clone(&strategy);
+                let con = Arc::clone(&config);
+                let stop_rx = stop_rx.clone();
 
-        // Creating connections
-        for i in 0..config.connection_number {
-            let strategy = Arc::clone(&strategy);
-            let con = Arc::clone(&config);
-            // Getting websocket connection
-            let mut ws = self.get_ws_connection(&con.url_under_fire).await?;
+                async move {
+                    let ws = match self.get_ws_connection(&con.url_under_fire).await {
+                        Ok(mut ws) => {
+                            // Sending hello
+                            if let Err(e) = ws.send(Message::Text(format!("Peer {}", i).into())).await {
+                                println!("Send err: {}, On connection: {}", e, i);
+                                return None;
+                            }
+                            ws
+                        },
+                        Err(e) => {
+                            println!("Connection failed: {}", e);
+                            return None;
+                        }
+                    };
 
-            // Saying hello to connection
-            ws.send(Message::Text(format!("Peer {} saying Hello!", i).into()))
-                .await?;
+                    // Returning future from strategy
+                    Some(strategy.get_task(ws, stop_rx, i))
+                }
 
-            // Creating writer task for connection
-            let task = strategy.get_task(ws, stop_rx.clone(), i);
-            tasks.push(task);
-        }
+            })
+            .buffer_unordered(100)
+            .filter_map(|task| async move { task })
+            .collect::<Vec<ConnectionTaskFuture>>()
+            .await;
+
         Ok(tasks)
     }
 
