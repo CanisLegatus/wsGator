@@ -37,19 +37,21 @@ pub trait AttackStrategy: Send + Sync {
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
         mut writer_rx: MpscReceiver<Message>,
         mut stop_rx: WatchReceiver<bool>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), WsError>> + Send>> {
         Box::pin(async move {
             loop {
                 tokio::select! {
                     opt_message = writer_rx.recv() => {
                         match opt_message {
-                            Some(message) => { sink.send(message).await; },
+                            // Maybe I should add a retry?
+                            Some(message) => { sink.send(message).await?; },
                             None => { break; }
                         }
                     },
                     _= stop_rx.changed() => { break; }
                 }
             }
+            Ok(())
         })
     }
 
@@ -93,7 +95,7 @@ pub trait AttackStrategy: Send + Sync {
             let (proceed, message) = self.handle_messages(msg, i);
 
             if let Some(message) = message {
-                writer_tx.send(message).await;
+                writer_tx.send(message).await?;
             }
 
             if !proceed {
