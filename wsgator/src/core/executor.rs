@@ -1,7 +1,7 @@
 use crate::{AttackStrategy, CommonConfig};
+use futures::SinkExt;
 use futures::stream;
 use futures::stream::StreamExt;
-use futures::SinkExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -41,9 +41,8 @@ impl Executor {
         config: Arc<CommonConfig>,
         stop_rx: WatchReceiver<bool>,
     ) -> Result<Vec<ConnectionTaskFuture>, WsError> {
-        
         let tasks: Vec<ConnectionTaskFuture> = stream::iter(0..config.connection_number)
-            .map(| i | {
+            .map(|i| {
                 let strategy = Arc::clone(&strategy);
                 let con = Arc::clone(&config);
                 let stop_rx = stop_rx.clone();
@@ -52,12 +51,14 @@ impl Executor {
                     let ws = match self.get_ws_connection(&con.url_under_fire).await {
                         Ok(mut ws) => {
                             // Sending hello
-                            if let Err(e) = ws.send(Message::Text(format!("Peer {}", i).into())).await {
+                            if let Err(e) =
+                                ws.send(Message::Text(format!("Peer {}", i).into())).await
+                            {
                                 println!("Send err: {}, On connection: {}", e, i);
                                 return None;
                             }
                             ws
-                        },
+                        }
                         Err(e) => {
                             println!("Connection failed: {}", e);
                             return None;
@@ -67,7 +68,6 @@ impl Executor {
                     // Returning future from strategy
                     Some(strategy.get_task(ws, stop_rx, i))
                 }
-
             })
             .buffer_unordered(100)
             .filter_map(|task| async move { task })
