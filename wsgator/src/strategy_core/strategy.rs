@@ -1,3 +1,5 @@
+use crate::core::error::MpscChannelError;
+use crate::core::error::WsGatorError;
 use crate::CommonConfig;
 use async_trait::async_trait;
 use futures::SinkExt;
@@ -14,7 +16,6 @@ use tokio::sync::mpsc::Sender as MpscSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
 
 // Enumiration for TypeChecking while getting user input from CLI
@@ -28,8 +29,9 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
-    fn handle_special_events(&self) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        Box::pin(future::pending())
+    async fn handle_special_events(&self) -> Result<(), WsGatorError> {
+        future::pending::<()>().await; 
+        Ok(())
     }
 
     async fn get_writer(
@@ -37,7 +39,7 @@ pub trait AttackStrategy: Send + Sync {
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
         mut writer_rx: MpscReceiver<Message>,
         mut stop_rx: WatchReceiver<bool>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), WsError>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>> {
         Box::pin(async move {
             loop {
                 tokio::select! {
@@ -48,7 +50,9 @@ pub trait AttackStrategy: Send + Sync {
                             None => { break; }
                         }
                     },
-                    _= stop_rx.changed() => { break; }
+                    result = stop_rx.changed() => { 
+                        result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;    
+                        break; }
                 }
             }
             Ok(())
@@ -60,7 +64,7 @@ pub trait AttackStrategy: Send + Sync {
         ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
         mut stop_rx: WatchReceiver<bool>,
         i: u32,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+    ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send + 'static>>
     where
         Self: 'static,
     {
@@ -73,15 +77,17 @@ pub trait AttackStrategy: Send + Sync {
 
             loop {
                 tokio::select! {
-                    _ = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => {}
-                    _ = self.handle_special_events() => {}
-                    _ = stop_rx.changed() => {
+                    result = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => { result?; }
+                    result = self.handle_special_events() => { result?; }
+                    result = stop_rx.changed() => {
+                        result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
                         println!("Connection {}: Reached its target time. Sending Close Frame", i);
-                        let _ = writer_tx.send(Message::Close(None)).await;
+                        writer_tx.send(Message::Close(None)).await.map_err(|e| WsGatorError::MpscChannel(e.into()))?;
                         break;
                     }
                 }
             }
+            Ok(())
         })
     }
 
@@ -90,7 +96,7 @@ pub trait AttackStrategy: Send + Sync {
         stream: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
         writer_tx: MpscSender<Message>,
         i: u32,
-    ) -> Result<bool, WsError> {
+    ) -> Result<bool, MpscChannelError> {
         if let Some(msg) = stream.next().await {
             let (proceed, message) = self.handle_messages(msg, i);
 
