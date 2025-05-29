@@ -7,6 +7,7 @@ use futures::StreamExt;
 use futures::future;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
+use tokio::sync::mpsc::error::TryRecvError;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -105,7 +106,8 @@ pub trait AttackStrategy: Send + Sync {
             }
 
             if !proceed {
-                return Ok(false);
+                // TODO: this handle base events is bad
+                return Err(MpscChannelError::TryRecv(TryRecvError::Empty));
             } else {
                 return Ok(true);
             }

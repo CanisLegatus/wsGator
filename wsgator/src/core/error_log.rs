@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio_tungstenite::tungstenite::error::Error;
 
+#[derive(Debug)]
 pub struct ErrorLog {
     connection_closed: AtomicU32,
     already_closed: AtomicU32,

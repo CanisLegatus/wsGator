@@ -2,6 +2,7 @@ use crate::{AttackStrategy, CommonConfig};
 use futures::SinkExt;
 use futures::stream;
 use futures::stream::StreamExt;
+use tokio::task::JoinSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -13,7 +14,12 @@ pub struct Executor;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-type ConnectionTaskFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+use super::error::WatchChannelError;
+use super::error::WsGatorError;
+use super::error_log;
+use super::error_log::ErrorLog;
+type ConnectionTaskFuture = Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send + 'static>>;
 
 impl Executor {
     async fn get_ws_connection(
@@ -26,11 +32,12 @@ impl Executor {
 
     pub fn get_timer_task(
         config: Arc<CommonConfig>,
-    ) -> (WatchReceiver<bool>, Pin<Box<impl Future<Output = ()>>>) {
+    ) -> (WatchReceiver<bool>, Pin<Box<impl Future<Output = Result<(), WatchChannelError>>>>) {
         let (stop_tx, stop_rx) = watch::channel(false);
         let task = Box::pin(async move {
             tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
-            let _ = stop_tx.send(true);
+            stop_tx.send(true)?;
+            Ok(())
         });
         (stop_rx, task)
     }
@@ -80,11 +87,13 @@ impl Executor {
     pub async fn run(
         &self,
         strategy: Arc<dyn AttackStrategy + Send + Sync>,
+        log: Arc<ErrorLog>,
     ) -> Result<(), WsError> {
         let config = strategy.get_common_config();
 
         for _wave in 0..config.waves_number {
             let con = Arc::clone(&config);
+            let mut join_set = JoinSet::new();
 
             // Creating independent watch_channel to stop all tasks extenally
             let (watch_channel, timer_task) = Self::get_timer_task(con);
@@ -96,11 +105,28 @@ impl Executor {
             // Spawning collected tasks
             for task in tasks {
                 tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
-                tokio::spawn(task);
+                join_set.spawn(task);
             }
 
             // Spawning timer
             tokio::spawn(timer_task);
+            
+            while let Some(res) = join_set.join_next().await {
+                match res {
+                    Ok(Ok(())) => continue,
+                    Ok(Err(e)) => {
+                        match e {
+                            WsGatorError::WsError(inner) => {
+                                log.count(inner);
+                            },
+                            _=> {  }
+                        }
+                    },
+                    Err(join_error) => {
+                        println!("Join Error! Error: {}", join_error);
+                    },
+                }
+            }
 
             // Waves delay timer
             tokio::time::sleep(Duration::from_secs(config.waves_pause)).await;
