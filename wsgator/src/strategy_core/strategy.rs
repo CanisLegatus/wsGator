@@ -78,7 +78,13 @@ pub trait AttackStrategy: Send + Sync {
 
             loop {
                 tokio::select! {
-                    result = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => { result?; }
+                    result = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => { 
+                        match result {
+                            Ok(false) => break,
+                            Ok(true) => {},
+                            Err(e) => { return Err(e.into()); }
+                        }        
+                    }
                     result = self.handle_special_events() => { result?; }
                     result = stop_rx.changed() => {
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
@@ -98,21 +104,18 @@ pub trait AttackStrategy: Send + Sync {
         writer_tx: MpscSender<Message>,
         i: u32,
     ) -> Result<bool, MpscChannelError> {
-        if let Some(msg) = stream.next().await {
-            let (proceed, message) = self.handle_messages(msg, i);
-
-            if let Some(message) = message {
-                writer_tx.send(message).await?;
+        
+        match stream.next().await {
+            Some(msg) => {
+                let (proceed, message_opt) = self.handle_messages(msg, i);
+                if let Some(message) = message_opt {
+                    writer_tx.send(message).await?;
+                }
+                Ok(proceed)
+            },
+            None => {
+                Ok(false)
             }
-
-            if !proceed {
-                // TODO: this handle base events is bad
-                return Err(MpscChannelError::TryRecv(TryRecvError::Empty));
-            } else {
-                return Ok(true);
-            }
-        } else {
-            return Ok(true);
         }
     }
 
@@ -131,7 +134,7 @@ pub trait AttackStrategy: Send + Sync {
                 }
                 Message::Close(_) => (false, None),
 
-                _ => (false, None),
+                _ => (true, None),
             },
             Err(e) => {
                 println!(
