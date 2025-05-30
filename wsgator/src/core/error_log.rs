@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use tokio_tungstenite::tungstenite::error::Error;
+use tokio_tungstenite::tungstenite::error::Error as WsError;
 
 #[derive(Debug)]
 pub struct ErrorLog {
@@ -35,42 +35,42 @@ impl ErrorLog {
             http_format: AtomicU32::new(0),
         })
     }
-    pub fn count(&self, error: Error) {
+    pub fn count(&self, error: WsError) {
         match error {
-            Error::ConnectionClosed => {
+            WsError::ConnectionClosed => {
                 self.connection_closed.fetch_add(1, Ordering::Relaxed);
             }
-            Error::AlreadyClosed => {
+            WsError::AlreadyClosed => {
                 self.already_closed.fetch_add(1, Ordering::Relaxed);
             }
-            Error::Io(_) => {
+            WsError::Io(_) => {
                 self.io.fetch_add(1, Ordering::Relaxed);
             }
-            Error::Tls(_) => {
+            WsError::Tls(_) => {
                 self.tls.fetch_add(1, Ordering::Relaxed);
             }
-            Error::Capacity(_) => {
+            WsError::Capacity(_) => {
                 self.capacity.fetch_add(1, Ordering::Relaxed);
             }
-            Error::Protocol(_) => {
+            WsError::Protocol(_) => {
                 self.protocol.fetch_add(1, Ordering::Relaxed);
             }
-            Error::WriteBufferFull(_) => {
+            WsError::WriteBufferFull(_) => {
                 self.write_buffer_full.fetch_add(1, Ordering::Relaxed);
             }
-            Error::Utf8 => {
+            WsError::Utf8 => {
                 self.utf8.fetch_add(1, Ordering::Relaxed);
             }
-            Error::AttackAttempt => {
+            WsError::AttackAttempt => {
                 self.attack_attempt.fetch_add(1, Ordering::Relaxed);
             }
-            Error::Url(_) => {
+            WsError::Url(_) => {
                 self.url.fetch_add(1, Ordering::Relaxed);
             }
-            Error::Http(_) => {
+            WsError::Http(_) => {
                 self.http.fetch_add(1, Ordering::Relaxed);
             }
-            Error::HttpFormat(_) => {
+            WsError::HttpFormat(_) => {
                 self.http_format.fetch_add(1, Ordering::Relaxed);
             }
         }

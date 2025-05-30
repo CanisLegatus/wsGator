@@ -1,13 +1,11 @@
-use crate::core::error::MpscChannelError;
-use crate::core::error::WsGatorError;
 use crate::CommonConfig;
+use crate::core::error::WsGatorError;
 use async_trait::async_trait;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::future;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
-use tokio::sync::mpsc::error::TryRecvError;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -17,7 +15,7 @@ use tokio::sync::mpsc::Sender as MpscSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 // Enumiration for TypeChecking while getting user input from CLI
 #[derive(clap::ValueEnum, Clone, Copy)]
@@ -31,7 +29,7 @@ pub enum AttackStrategyType {
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
     async fn handle_special_events(&self) -> Result<(), WsGatorError> {
-        future::pending::<()>().await; 
+        future::pending::<()>().await;
         Ok(())
     }
 
@@ -51,8 +49,8 @@ pub trait AttackStrategy: Send + Sync {
                             None => { break; }
                         }
                     },
-                    result = stop_rx.changed() => { 
-                        result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;    
+                    result = stop_rx.changed() => {
+                        result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
                         break; }
                 }
             }
@@ -78,12 +76,12 @@ pub trait AttackStrategy: Send + Sync {
 
             loop {
                 tokio::select! {
-                    result = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => { 
+                    result = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => {
                         match result {
                             Ok(false) => break,
                             Ok(true) => {},
-                            Err(e) => { return Err(e.into()); }
-                        }        
+                            Err(e) => { return Err(e); }
+                        }
                     }
                     result = self.handle_special_events() => { result?; }
                     result = stop_rx.changed() => {
@@ -103,19 +101,21 @@ pub trait AttackStrategy: Send + Sync {
         stream: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
         writer_tx: MpscSender<Message>,
         i: u32,
-    ) -> Result<bool, MpscChannelError> {
-        
+    ) -> Result<bool, WsGatorError> {
         match stream.next().await {
             Some(msg) => {
-                let (proceed, message_opt) = self.handle_messages(msg, i);
+                let (proceed, message_opt) = self
+                    .handle_messages(msg, i)
+                    .map_err(WsGatorError::WsError)?;
                 if let Some(message) = message_opt {
-                    writer_tx.send(message).await?;
+                    writer_tx
+                        .send(message)
+                        .await
+                        .map_err(|e| WsGatorError::MpscChannel(e.into()))?;
                 }
                 Ok(proceed)
-            },
-            None => {
-                Ok(false)
             }
+            None => Ok(false),
         }
     }
 
@@ -123,25 +123,25 @@ pub trait AttackStrategy: Send + Sync {
         &self,
         msg: Result<Message, tokio_tungstenite::tungstenite::Error>,
         connection_number: u32,
-    ) -> (bool, Option<Message>) {
+    ) -> Result<(bool, Option<Message>), Box<WsError>> {
         match msg {
             Ok(message) => match message {
-                Message::Ping(bytes) => (true, Some(Message::Pong(bytes))),
+                Message::Ping(bytes) => Ok((true, Some(Message::Pong(bytes)))),
 
                 Message::Text(txt) => {
                     println!("Connection {}: Recieved a text: {}", connection_number, txt);
-                    (true, None)
+                    Ok((true, None))
                 }
-                Message::Close(_) => (false, None),
+                Message::Close(_) => Ok((false, None)),
 
-                _ => (true, None),
+                _ => Ok((true, None)),
             },
             Err(e) => {
                 println!(
                     "Connection {}: Recieved Err inside a message on listening to next message: {}",
                     connection_number, e
                 );
-                (false, None)
+                Err(Box::new(e))
             }
         }
     }

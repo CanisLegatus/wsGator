@@ -10,7 +10,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 pub enum WsGatorError {
     MpscChannel(MpscChannelError),
     WatchChannel(WatchChannelError),
-    WsError(WsError),
+    WsError(Box<WsError>),
 }
 
 impl Error for WsGatorError {}
@@ -27,7 +27,7 @@ impl Display for WsGatorError {
 
 impl From<WsError> for WsGatorError {
     fn from(value: WsError) -> Self {
-        WsGatorError::WsError(value)
+        WsGatorError::WsError(Box::new(value))
     }
 }
 
@@ -74,7 +74,6 @@ impl From<TryRecvError> for MpscChannelError {
         MpscChannelError::TryRecv(value)
     }
 }
-
 
 impl Display for MpscChannelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

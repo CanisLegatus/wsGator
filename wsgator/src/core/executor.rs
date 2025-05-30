@@ -2,11 +2,11 @@ use crate::{AttackStrategy, CommonConfig};
 use futures::SinkExt;
 use futures::stream;
 use futures::stream::StreamExt;
-use tokio::task::JoinSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::sync::watch::Receiver as WatchReceiver;
+use tokio::task::JoinSet;
 use tokio::time::Duration;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -17,9 +17,9 @@ use tokio_tungstenite::WebSocketStream;
 
 use super::error::WatchChannelError;
 use super::error::WsGatorError;
-use super::error_log;
 use super::error_log::ErrorLog;
-type ConnectionTaskFuture = Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send + 'static>>;
+type ConnectionTaskFuture =
+    Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send + 'static>>;
 
 impl Executor {
     async fn get_ws_connection(
@@ -32,7 +32,10 @@ impl Executor {
 
     pub fn get_timer_task(
         config: Arc<CommonConfig>,
-    ) -> (WatchReceiver<bool>, Pin<Box<impl Future<Output = Result<(), WatchChannelError>>>>) {
+    ) -> (
+        WatchReceiver<bool>,
+        Pin<Box<impl Future<Output = Result<(), WatchChannelError>>>>,
+    ) {
         let (stop_tx, stop_rx) = watch::channel(false);
         let task = Box::pin(async move {
             tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
@@ -110,21 +113,20 @@ impl Executor {
 
             // Spawning timer
             tokio::spawn(timer_task);
-            
+
+            // Handling errors in async tasks
             while let Some(res) = join_set.join_next().await {
                 match res {
                     Ok(Ok(())) => continue,
-                    Ok(Err(e)) => {
-                        match e {
-                            WsGatorError::WsError(inner) => {
-                                log.count(inner);
-                            },
-                            _=> {  }
+                    Ok(Err(e)) => match e {
+                        WsGatorError::WsError(inner) => {
+                            log.count(*inner);
                         }
+                        _ => {}
                     },
                     Err(join_error) => {
                         println!("Join Error! Error: {}", join_error);
-                    },
+                    }
                 }
             }
 

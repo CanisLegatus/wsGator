@@ -1,5 +1,4 @@
 use clap::Parser;
-use core::error_log;
 use std::sync::Arc;
 
 mod configs;
@@ -33,9 +32,7 @@ async fn main() {
     let error_log = ErrorLog::new();
     let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args);
 
-
     let executor_task = tokio::spawn({
-        
         let error_log = Arc::clone(&error_log);
         let strategy = Arc::clone(&strategy);
 
