@@ -33,27 +33,35 @@ pub trait AttackStrategy: Send + Sync {
         Ok(())
     }
 
-    async fn get_writer(
+    fn get_writer(
         self: Arc<Self>,
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
         mut writer_rx: MpscReceiver<Message>,
         mut stop_rx: WatchReceiver<bool>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>> {
         Box::pin(async move {
+            println!("WRITER: Entering loop");
             loop {
                 tokio::select! {
                     opt_message = writer_rx.recv() => {
                         match opt_message {
-                            // Maybe I should add a retry?
-                            Some(message) => { sink.send(message).await?; },
-                            None => { break; }
+                            Some(message) => { 
+                                eprintln!("WRITER: Before send");
+                                sink.send(message).await?;
+                                eprintln!("WRITER: After send");
+                            },
+                            None => { 
+                                eprintln!("WRITER: Dropping because of NONE");
+                                break; }
                         }
                     },
                     result = stop_rx.changed() => {
+                        eprintln!("WRITER: Dropping because of stop_rx.changed()");
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
                         break; }
                 }
             }
+            println!("WRITER: Exiting loop");
             Ok(())
         })
     }
@@ -72,7 +80,7 @@ pub trait AttackStrategy: Send + Sync {
             let (writer_tx, writer_rx) = mpsc::channel::<Message>(32);
             let writer = self.clone().get_writer(sink, writer_rx, stop_rx.clone());
 
-            tokio::spawn(writer);
+            let writer_handler = tokio::spawn(writer);
 
             loop {
                 tokio::select! {
@@ -92,6 +100,7 @@ pub trait AttackStrategy: Send + Sync {
                     }
                 }
             }
+            let _ = writer_handler.await;
             Ok(())
         })
     }
@@ -109,9 +118,11 @@ pub trait AttackStrategy: Send + Sync {
                     .map_err(WsGatorError::WsError)?;
                 if let Some(message) = message_opt {
                     writer_tx
-                        .send(message)
+                        .send(message.clone())
                         .await
-                        .map_err(|e| WsGatorError::MpscChannel(e.into()))?;
+                        .map_err(|e| {
+                            println!("BASE: Error on MPSC Msg: {:?}, Err: {}", message, e); 
+                            WsGatorError::MpscChannel(e.into())})?;
                 }
                 Ok(proceed)
             }
