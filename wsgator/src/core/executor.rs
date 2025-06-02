@@ -50,8 +50,8 @@ impl Executor {
         strategy: Arc<dyn AttackStrategy + Send>,
         config: Arc<CommonConfig>,
         stop_rx: WatchReceiver<bool>,
-    ) -> Result<Vec<ConnectionTaskFuture>, WsError> {
-        let tasks: Vec<ConnectionTaskFuture> = stream::iter(0..config.connection_number)
+    ) -> Result<Vec<Result<ConnectionTaskFuture, WsError>>, WsError> {
+        let tasks: Vec<Result<ConnectionTaskFuture, WsError>> = stream::iter(0..config.connection_number)
             .map(|i| {
                 let strategy = Arc::clone(&strategy);
                 let con = Arc::clone(&config);
@@ -65,23 +65,22 @@ impl Executor {
                                 ws.send(Message::Text(format!("Peer {}", i).into())).await
                             {
                                 println!("Send err: {}, On connection: {}", e, i);
-                                return None;
+                                return Err(e); 
                             }
                             ws
                         }
                         Err(e) => {
                             println!("Connection failed: {}", e);
-                            return None;
+                            return Err(e);
                         }
                     };
 
                     // Returning future from strategy
-                    Some(strategy.get_task(ws, stop_rx, i))
+                    Ok(strategy.get_task(ws, stop_rx, i))
                 }
             })
             .buffer_unordered(100)
-            .filter_map(|task| async move { task })
-            .collect::<Vec<ConnectionTaskFuture>>()
+            .collect::<Vec<Result<ConnectionTaskFuture, WsError>>>()
             .await;
 
         Ok(tasks)
@@ -107,8 +106,16 @@ impl Executor {
             // Waves logic
             // Spawning collected tasks
             for task in tasks {
-                tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
-                join_set.spawn(task);
+                match task {
+                    Ok(task) => {
+                        tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
+                        join_set.spawn(task);
+                    },
+                    Err(e) => {
+                        log.count(e.into());
+                    }
+                } 
+                
             }
 
             // Spawning timer
@@ -118,11 +125,8 @@ impl Executor {
             while let Some(res) = join_set.join_next().await {
                 match res {
                     Ok(Ok(())) => continue,
-                    Ok(Err(e)) => match e {
-                        WsGatorError::WsError(inner) => {
-                            log.count(*inner);
-                        }
-                        _ => {}
+                    Ok(Err(e)) => {
+                        log.count(e);
                     },
                     Err(join_error) => {
                         println!("Join Error! Error: {}", join_error);
