@@ -26,6 +26,8 @@ pub struct ErrorLog {
 
     watcher_send: AtomicU32,
     watcher_recv: AtomicU32,
+
+    join_err: AtomicU32,
 }
 
 impl ErrorLog {
@@ -51,6 +53,8 @@ impl ErrorLog {
 
             watcher_send: AtomicU32::new(0),
             watcher_recv: AtomicU32::new(0),
+
+            join_err: AtomicU32::new(0),
         })
     }
 
@@ -135,6 +139,10 @@ impl ErrorLog {
 
             WsGatorError::WatchChannel(inner) => {
                 self.count_watch_err(inner);
+            }
+
+            WsGatorError::JoinError(_) => {
+                self.join_err.fetch_add(1, Ordering::Relaxed);
             }
         }
     }

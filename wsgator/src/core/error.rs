@@ -4,6 +4,7 @@ use tokio::sync::mpsc::error::{
     SendError as MpscSendError, SendTimeoutError, TryRecvError, TrySendError,
 };
 use tokio::sync::watch::error::{RecvError, SendError as WatchSendError};
+use tokio::task::JoinError;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 #[derive(Debug)]
@@ -11,6 +12,7 @@ pub enum WsGatorError {
     MpscChannel(MpscChannelError),
     WatchChannel(WatchChannelError),
     WsError(Box<WsError>),
+    JoinError(JoinError),
 }
 
 impl Error for WsGatorError {}
@@ -21,6 +23,7 @@ impl Display for WsGatorError {
             WsGatorError::MpscChannel(inner) => write!(f, "MPSC Channel error: {}", inner),
             WsGatorError::WatchChannel(inner) => write!(f, "Watch Channel error: {}", inner),
             WsGatorError::WsError(inner) => write!(f, "Web Socket Error: {}", inner),
+            WsGatorError::JoinError(inner) => write!(f, "JoinError Error: {}", inner),
         }
     }
 }
@@ -40,6 +43,12 @@ impl From<MpscChannelError> for WsGatorError {
 impl From<WatchChannelError> for WsGatorError {
     fn from(value: WatchChannelError) -> Self {
         WsGatorError::WatchChannel(value)
+    }
+}
+
+impl From<JoinError> for WsGatorError {
+    fn from(value: JoinError) -> Self {
+        WsGatorError::JoinError(value)
     }
 }
 

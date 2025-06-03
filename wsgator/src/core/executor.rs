@@ -104,6 +104,10 @@ impl Executor {
                 .get_connections(strategy.clone(), config.clone(), watch_channel)
                 .await?;
 
+            println!("--->> STARTING IN 3 SECONDS <<---");
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            println!("--->>🐊 BITE! 🐊<<---");
+
             // Waves logic
             // Spawning collected tasks
             for task in tasks {
