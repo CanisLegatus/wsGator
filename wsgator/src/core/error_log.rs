@@ -18,7 +18,7 @@ pub struct ErrorLog {
     url: AtomicU32,
     http: AtomicU32,
     http_format: AtomicU32,
-    
+
     mpsc_send: AtomicU32,
     mpsc_try_send: AtomicU32,
     mpsc_send_timeout: AtomicU32,
@@ -97,17 +97,29 @@ impl ErrorLog {
 
     fn count_mpsc_err(&self, error: MpscChannelError) {
         match error {
-            MpscChannelError::Send(_) => { self.mpsc_send.fetch_add(1, Ordering::Relaxed); }
-            MpscChannelError::SendTimeout(_) => { self.mpsc_send_timeout.fetch_add(1, Ordering::Relaxed); },
-            MpscChannelError::TryRecv(_) => { self.mpsc_try_recv.fetch_add(1, Ordering::Relaxed); },
-            MpscChannelError::TrySend(_) => { self.mpsc_try_send.fetch_add(1, Ordering::Relaxed); },
+            MpscChannelError::Send(_) => {
+                self.mpsc_send.fetch_add(1, Ordering::Relaxed);
+            }
+            MpscChannelError::SendTimeout(_) => {
+                self.mpsc_send_timeout.fetch_add(1, Ordering::Relaxed);
+            }
+            MpscChannelError::TryRecv(_) => {
+                self.mpsc_try_recv.fetch_add(1, Ordering::Relaxed);
+            }
+            MpscChannelError::TrySend(_) => {
+                self.mpsc_try_send.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 
     fn count_watch_err(&self, error: WatchChannelError) {
         match error {
-            WatchChannelError::Send(_) => { self.watcher_send.fetch_add(1, Ordering::Relaxed); }
-            WatchChannelError::Recv(_) => { self.watcher_recv.fetch_add(1, Ordering::Relaxed); }
+            WatchChannelError::Send(_) => {
+                self.watcher_send.fetch_add(1, Ordering::Relaxed);
+            }
+            WatchChannelError::Recv(_) => {
+                self.watcher_recv.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 
@@ -115,11 +127,11 @@ impl ErrorLog {
         match error {
             WsGatorError::WsError(inner) => {
                 self.count_ws_err(inner);
-            },
+            }
 
             WsGatorError::MpscChannel(inner) => {
                 self.count_mpsc_err(inner);
-            },
+            }
 
             WsGatorError::WatchChannel(inner) => {
                 self.count_watch_err(inner);

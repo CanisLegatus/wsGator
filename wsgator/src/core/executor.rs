@@ -51,37 +51,38 @@ impl Executor {
         config: Arc<CommonConfig>,
         stop_rx: WatchReceiver<bool>,
     ) -> Result<Vec<Result<ConnectionTaskFuture, WsError>>, WsError> {
-        let tasks: Vec<Result<ConnectionTaskFuture, WsError>> = stream::iter(0..config.connection_number)
-            .map(|i| {
-                let strategy = Arc::clone(&strategy);
-                let con = Arc::clone(&config);
-                let stop_rx = stop_rx.clone();
+        let tasks: Vec<Result<ConnectionTaskFuture, WsError>> =
+            stream::iter(0..config.connection_number)
+                .map(|i| {
+                    let strategy = Arc::clone(&strategy);
+                    let con = Arc::clone(&config);
+                    let stop_rx = stop_rx.clone();
 
-                async move {
-                    let ws = match self.get_ws_connection(&con.url_under_fire).await {
-                        Ok(mut ws) => {
-                            // Sending hello
-                            if let Err(e) =
-                                ws.send(Message::Text(format!("Peer {}", i).into())).await
-                            {
-                                println!("Send err: {}, On connection: {}", e, i);
-                                return Err(e); 
+                    async move {
+                        let ws = match self.get_ws_connection(&con.url_under_fire).await {
+                            Ok(mut ws) => {
+                                // Sending hello
+                                if let Err(e) =
+                                    ws.send(Message::Text(format!("Peer {}", i).into())).await
+                                {
+                                    println!("Send err: {}, On connection: {}", e, i);
+                                    return Err(e);
+                                }
+                                ws
                             }
-                            ws
-                        }
-                        Err(e) => {
-                            println!("Connection failed: {}", e);
-                            return Err(e);
-                        }
-                    };
+                            Err(e) => {
+                                println!("Connection failed: {}", e);
+                                return Err(e);
+                            }
+                        };
 
-                    // Returning future from strategy
-                    Ok(strategy.get_task(ws, stop_rx, i))
-                }
-            })
-            .buffer_unordered(100)
-            .collect::<Vec<Result<ConnectionTaskFuture, WsError>>>()
-            .await;
+                        // Returning future from strategy
+                        Ok(strategy.get_task(ws, stop_rx, i))
+                    }
+                })
+                .buffer_unordered(100)
+                .collect::<Vec<Result<ConnectionTaskFuture, WsError>>>()
+                .await;
 
         Ok(tasks)
     }
@@ -110,12 +111,11 @@ impl Executor {
                     Ok(task) => {
                         tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
                         join_set.spawn(task);
-                    },
+                    }
                     Err(e) => {
                         log.count(e.into());
                     }
-                } 
-                
+                }
             }
 
             // Spawning timer
@@ -127,7 +127,7 @@ impl Executor {
                     Ok(Ok(())) => continue,
                     Ok(Err(e)) => {
                         log.count(e);
-                    },
+                    }
                     Err(join_error) => {
                         println!("Join Error! Error: {}", join_error);
                     }

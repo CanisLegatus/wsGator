@@ -37,28 +37,18 @@ pub trait AttackStrategy: Send + Sync {
         self: Arc<Self>,
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
         mut writer_rx: MpscReceiver<Message>,
-        mut stop_rx: WatchReceiver<bool>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>> {
         Box::pin(async move {
             println!("WRITER: Entering loop");
             loop {
-                tokio::select! {
-                    opt_message = writer_rx.recv() => {
-                        match opt_message {
-                            Some(message) => { 
-                                eprintln!("WRITER: Before send");
-                                sink.send(message).await?;
-                                eprintln!("WRITER: After send");
-                            },
-                            None => { 
-                                eprintln!("WRITER: Dropping because of NONE");
-                                break; }
-                        }
-                    },
-                    result = stop_rx.changed() => {
-                        eprintln!("WRITER: Dropping because of stop_rx.changed()");
-                        result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
-                        break; }
+                match writer_rx.recv().await {
+                    Some(message) => {
+                        sink.send(message).await?;
+                    }
+                    None => {
+                        eprintln!("WRITER: Dropping because of NONE");
+                        break;
+                    }
                 }
             }
             println!("WRITER: Exiting loop");
@@ -78,7 +68,7 @@ pub trait AttackStrategy: Send + Sync {
         Box::pin(async move {
             let (sink, mut stream) = ws.split();
             let (writer_tx, writer_rx) = mpsc::channel::<Message>(32);
-            let writer = self.clone().get_writer(sink, writer_rx, stop_rx.clone());
+            let writer = self.clone().get_writer(sink, writer_rx);
 
             let writer_handler = tokio::spawn(writer);
 
@@ -95,7 +85,11 @@ pub trait AttackStrategy: Send + Sync {
                     result = stop_rx.changed() => {
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
                         println!("Connection {}: Reached its target time. Sending Close Frame", i);
-                        writer_tx.send(Message::Close(None)).await.map_err(|e| WsGatorError::MpscChannel(e.into()))?;
+                        writer_tx.send(Message::Close(None)).await.map_err(|e| {
+                            // Problem is here - sometimes we close writer before sending Close
+                            println!("GET TASK: Error on Close");
+                            WsGatorError::MpscChannel(e.into())})?;
+                        drop(writer_tx);
                         break;
                     }
                 }
@@ -117,12 +111,10 @@ pub trait AttackStrategy: Send + Sync {
                     .handle_messages(msg, i)
                     .map_err(WsGatorError::WsError)?;
                 if let Some(message) = message_opt {
-                    writer_tx
-                        .send(message.clone())
-                        .await
-                        .map_err(|e| {
-                            println!("BASE: Error on MPSC Msg: {:?}, Err: {}", message, e); 
-                            WsGatorError::MpscChannel(e.into())})?;
+                    writer_tx.send(message.clone()).await.map_err(|e| {
+                        println!("BASE: Error on MPSC Msg: {:?}, Err: {}", message, e);
+                        WsGatorError::MpscChannel(e.into())
+                    })?;
                 }
                 Ok(proceed)
             }
