@@ -23,13 +23,11 @@ impl AttackStrategy for FloodStrategy {
         writer_tx: MpscSender<Message>,
     ) -> Result<(), WsGatorError> {
         // This is extremely bad one - I need to completely redo this
-        loop {
             tokio::time::sleep(Duration::from_millis(self.spam_pause)).await;
             writer_tx
                 .send(Message::Text("SPAM MACHINE!".into()))
                 .await
                 .map_err(|e| WsGatorError::MpscChannel(e.into()))?;
-        }
         Ok(())
     }
 }
