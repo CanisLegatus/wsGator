@@ -1,6 +1,8 @@
 use crate::CommonConfig;
 use crate::core::error::WsGatorError;
 use async_trait::async_trait;
+use futures::pin_mut;
+use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::future;
@@ -28,12 +30,8 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
-    async fn handle_special_events(
-        &self,
-        _writer_tx: MpscSender<Message>,
-    ) -> Result<(), WsGatorError> {
-        future::pending::<()>().await;
-        Ok(())
+    fn prepare_special_events(self: Arc<Self>, _: MpscSender<Message>) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>{
+        Box::pin(future::pending())
     }
 
     fn get_writer(
@@ -60,21 +58,23 @@ pub trait AttackStrategy: Send + Sync {
     {
         Box::pin(async move {
             let (sink, mut stream) = ws.split();
-            let (writer_tx, writer_rx) = mpsc::channel::<Message>(100000);
+            let (writer_tx, writer_rx) = mpsc::channel::<Message>(128);
             let writer = self.clone().get_writer(sink, writer_rx);
 
             let writer_handler = tokio::spawn(writer);
+            let special_event = self.clone().prepare_special_events(writer_tx.clone()).fuse();
+            pin_mut!(special_event);
 
             loop {
                 tokio::select! {
-                    result = self.handle_base_events(&mut stream, writer_tx.clone() ,i) => {
+                    result = self.run_base_events(&mut stream, &writer_tx ,i) => {
                         match result {
                             Ok(false) => break,
                             Ok(true) => {},
                             Err(e) => { return Err(e); }
                         }
                     }
-                    result = self.handle_special_events(writer_tx.clone()) => { result?; }
+                    result = &mut special_event => { result?; }
                     result = stop_rx.changed() => {
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
                         println!("Connection {}: Reached its target time. Sending Close Frame", i);
@@ -92,10 +92,10 @@ pub trait AttackStrategy: Send + Sync {
         })
     }
 
-    async fn handle_base_events(
+    async fn run_base_events(
         &self,
         stream: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-        writer_tx: MpscSender<Message>,
+        writer_tx: &MpscSender<Message>,
         i: u32,
     ) -> Result<bool, WsGatorError> {
         match stream.next().await {

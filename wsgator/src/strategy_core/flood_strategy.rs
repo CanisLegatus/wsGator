@@ -1,4 +1,5 @@
 use crate::AttackStrategy;
+use std::pin::Pin;
 use crate::CommonConfig;
 use crate::core::error::WsGatorError;
 use async_trait::async_trait;
@@ -18,16 +19,18 @@ impl AttackStrategy for FloodStrategy {
         self.common_config.clone()
     }
 
-    async fn handle_special_events(
-        &self,
+    fn prepare_special_events(
+        self: Arc<Self>,
         writer_tx: MpscSender<Message>,
-    ) -> Result<(), WsGatorError> {
-        // This is extremely bad one - I need to completely redo this
+    ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>> {
+        Box::pin(async move {
+            loop{
             tokio::time::sleep(Duration::from_millis(self.spam_pause)).await;
             writer_tx
                 .send(Message::Text("SPAM MACHINE!".into()))
                 .await
                 .map_err(|e| WsGatorError::MpscChannel(e.into()))?;
-        Ok(())
+        }
+        })
     }
 }
