@@ -30,7 +30,10 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
-    fn prepare_special_events(self: Arc<Self>, _: MpscSender<Message>) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>{
+    fn prepare_special_events(
+        self: Arc<Self>,
+        _: MpscSender<Message>,
+        ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>{
         Box::pin(future::pending())
     }
 
@@ -62,8 +65,7 @@ pub trait AttackStrategy: Send + Sync {
             let writer = self.clone().get_writer(sink, writer_rx);
 
             let writer_handler = tokio::spawn(writer);
-            let special_event = self.clone().prepare_special_events(writer_tx.clone()).fuse();
-            pin_mut!(special_event);
+            let special_event_handle = tokio::spawn(self.clone().prepare_special_events(writer_tx.clone()));
 
             loop {
                 tokio::select! {
@@ -71,10 +73,13 @@ pub trait AttackStrategy: Send + Sync {
                         match result {
                             Ok(false) => break,
                             Ok(true) => {},
-                            Err(e) => { return Err(e); }
+                            Err(e) => { 
+                                special_event_handle.abort();
+                                writer_handler.abort();
+                                return Err(e); }
                         }
                     }
-                    result = &mut special_event => { result?; }
+                    //result = &mut special_event => { result?; }
                     result = stop_rx.changed() => {
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
                         println!("Connection {}: Reached its target time. Sending Close Frame", i);
@@ -85,7 +90,8 @@ pub trait AttackStrategy: Send + Sync {
                     }
                 }
             }
-
+            
+            special_event_handle.abort();    
             writer_handler.await??;
 
             Ok(())

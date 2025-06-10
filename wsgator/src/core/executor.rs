@@ -80,7 +80,7 @@ impl Executor {
                         Ok(strategy.get_task(ws, stop_rx, i))
                     }
                 })
-                .buffer_unordered(100)
+                .buffer_unordered(1000)
                 .collect::<Vec<Result<ConnectionTaskFuture, WsError>>>()
                 .await;
 
