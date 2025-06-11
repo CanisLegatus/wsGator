@@ -1,8 +1,6 @@
 use crate::CommonConfig;
 use crate::core::error::WsGatorError;
 use async_trait::async_trait;
-use futures::pin_mut;
-use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::future;
@@ -38,7 +36,7 @@ pub trait AttackStrategy: Send + Sync {
     }
 
     fn get_writer(
-        self: Arc<Self>,
+        &self,
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
         mut writer_rx: MpscReceiver<Message>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>> {
@@ -62,39 +60,44 @@ pub trait AttackStrategy: Send + Sync {
         Box::pin(async move {
             let (sink, mut stream) = ws.split();
             let (writer_tx, writer_rx) = mpsc::channel::<Message>(128);
-            let writer = self.clone().get_writer(sink, writer_rx);
+            let writer = self.get_writer(sink, writer_rx);
 
             let writer_handler = tokio::spawn(writer);
             let special_event_handle = tokio::spawn(self.clone().prepare_special_events(writer_tx.clone()));
+            
+            // TODO Change cancellation model for inner tasks (Cancellation token? Or Something?)
 
-            loop {
+            let result = loop {
                 tokio::select! {
-                    result = self.run_base_events(&mut stream, &writer_tx ,i) => {
+                    result = self.run_base_events(&mut stream, &writer_tx, i) => {
                         match result {
-                            Ok(false) => break,
+                            Ok(false) => {
+                                drop(writer_tx);
+                                break Ok(());
+                            },
                             Ok(true) => {},
                             Err(e) => { 
-                                special_event_handle.abort();
-                                writer_handler.abort();
-                                return Err(e); }
+                                drop(writer_tx);
+                                break Err(e);
+                            }
                         }
                     }
-                    //result = &mut special_event => { result?; }
                     result = stop_rx.changed() => {
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
                         println!("Connection {}: Reached its target time. Sending Close Frame", i);
                         writer_tx.send(Message::Close(None)).await.map_err(|e| {
                             WsGatorError::MpscChannel(e.into())})?;
                         drop(writer_tx);
-                        break;
+                        break Ok(());
                     }
                 }
-            }
+            };
             
-            special_event_handle.abort();    
+            // Clean up 
+            special_event_handle.abort();
             writer_handler.await??;
 
-            Ok(())
+            result
         })
     }
 

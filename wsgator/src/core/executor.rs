@@ -99,9 +99,9 @@ impl Executor {
             let mut join_set = JoinSet::new();
 
             // Creating independent watch_channel to stop all tasks extenally
-            let (watch_channel, timer_task) = Self::get_timer_task(con);
+            let (stop_rx, timer_task) = Self::get_timer_task(con);
             let tasks = self
-                .get_connections(strategy.clone(), config.clone(), watch_channel)
+                .get_connections(strategy.clone(), config.clone(), stop_rx)
                 .await?;
 
             println!("--->> STARTING IN 3 SECONDS <<---");
