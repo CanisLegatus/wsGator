@@ -1,11 +1,11 @@
-use crate::CommonConfig;
 use crate::core::error::WsGatorError;
+use crate::CommonConfig;
 use async_trait::async_trait;
-use futures::SinkExt;
-use futures::StreamExt;
 use futures::future;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
+use futures::SinkExt;
+use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -13,10 +13,9 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver as MpscReceiver;
 use tokio::sync::mpsc::Sender as MpscSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::{Error as WsError, Message};
-
 // Enumiration for TypeChecking while getting user input from CLI
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum AttackStrategyType {
@@ -31,8 +30,18 @@ pub trait AttackStrategy: Send + Sync {
     fn prepare_special_events(
         self: Arc<Self>,
         _: MpscSender<Message>,
-        ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>{
-        Box::pin(future::pending())
+        mut stop_rx: WatchReceiver<bool>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>> {
+        Box::pin(async move {
+            tokio::select! {
+                _ = future::pending() => {
+                    Ok(())
+                },
+                _ = stop_rx.changed() => {
+                    Ok(())
+                }
+            }
+        })
     }
 
     fn get_writer(
@@ -44,6 +53,7 @@ pub trait AttackStrategy: Send + Sync {
             while let Some(message) = writer_rx.recv().await {
                 sink.send(message).await?;
             }
+            println!("Writer finished");
             Ok(())
         })
     }
@@ -59,13 +69,14 @@ pub trait AttackStrategy: Send + Sync {
     {
         Box::pin(async move {
             let (sink, mut stream) = ws.split();
-            let (writer_tx, writer_rx) = mpsc::channel::<Message>(128);
+            let (writer_tx, writer_rx) = mpsc::channel::<Message>(10000);
             let writer = self.get_writer(sink, writer_rx);
 
             let writer_handler = tokio::spawn(writer);
-            let special_event_handle = tokio::spawn(self.clone().prepare_special_events(writer_tx.clone()));
-            
-            // TODO Change cancellation model for inner tasks (Cancellation token? Or Something?)
+            let special_event_handle = tokio::spawn(
+                self.clone()
+                    .prepare_special_events(writer_tx.clone(), stop_rx.clone()),
+            );
 
             let result = loop {
                 tokio::select! {
@@ -76,7 +87,7 @@ pub trait AttackStrategy: Send + Sync {
                                 break Ok(());
                             },
                             Ok(true) => {},
-                            Err(e) => { 
+                            Err(e) => {
                                 drop(writer_tx);
                                 break Err(e);
                             }
@@ -84,7 +95,6 @@ pub trait AttackStrategy: Send + Sync {
                     }
                     result = stop_rx.changed() => {
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
-                        println!("Connection {}: Reached its target time. Sending Close Frame", i);
                         writer_tx.send(Message::Close(None)).await.map_err(|e| {
                             WsGatorError::MpscChannel(e.into())})?;
                         drop(writer_tx);
@@ -92,9 +102,9 @@ pub trait AttackStrategy: Send + Sync {
                     }
                 }
             };
-            
-            // Clean up 
-            special_event_handle.abort();
+
+            // Awaiting for everyone to stop
+            special_event_handle.await??;
             writer_handler.await??;
 
             result

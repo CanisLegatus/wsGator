@@ -1,11 +1,13 @@
-use crate::AttackStrategy;
-use std::pin::Pin;
-use crate::CommonConfig;
 use crate::core::error::WsGatorError;
+use crate::AttackStrategy;
+use crate::CommonConfig;
 use async_trait::async_trait;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender as MpscSender;
+use tokio::sync::watch::Receiver as WatchReceiver;
+use tokio::time::interval;
 use tokio_tungstenite::tungstenite::Message;
 
 pub struct FloodStrategy {
@@ -22,16 +24,27 @@ impl AttackStrategy for FloodStrategy {
     fn prepare_special_events(
         self: Arc<Self>,
         writer_tx: MpscSender<Message>,
+        mut stop_rx: WatchReceiver<bool>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>> {
         Box::pin(async move {
+            let mut interval = interval(Duration::from_millis(self.spam_pause));
+            interval.tick().await;
 
-            loop{
-                tokio::time::sleep(Duration::from_millis(self.spam_pause)).await;
-                writer_tx
-                    .send(Message::Text("SPAM".into()))
-                    .await
-                    .map_err(|e| WsGatorError::MpscChannel(e.into()))?;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        writer_tx
+                            .send(Message::Text("SPAM".into()))
+                            .await
+                            .map_err(|e| WsGatorError::MpscChannel(e.into()))?;
+                    },
+
+                    _ = stop_rx.changed() => {
+                        break;
+                    }
+                }
             }
+            Ok(())
         })
     }
 }

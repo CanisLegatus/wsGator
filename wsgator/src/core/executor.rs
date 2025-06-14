@@ -1,7 +1,7 @@
 use crate::{AttackStrategy, CommonConfig};
-use futures::SinkExt;
 use futures::stream;
 use futures::stream::StreamExt;
+use futures::SinkExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -44,6 +44,8 @@ impl Executor {
         });
         (stop_rx, task)
     }
+
+    // TODO I need to fix weird logic behind opening a ws and "spawning" it
 
     pub async fn get_connections(
         &self,
