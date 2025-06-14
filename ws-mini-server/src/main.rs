@@ -1,31 +1,30 @@
+use futures::lock::Mutex;
 use futures::SinkExt;
 use futures::StreamExt;
-use futures::lock::Mutex;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message};
+use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let counter = Arc::new(Mutex::new(0));
+    let counter = Arc::new(AtomicU32::new(0));
 
     let listener = TcpListener::bind("127.0.0.1:9001").await?;
 
     println!("🚀 Server listening on ws://127.0.0.1:9001");
 
     while let Ok((stream, _)) = listener.accept().await {
-        let mut n_counter = counter.lock().await;
-        *n_counter += 1;
+        counter.fetch_add(1, Ordering::Relaxed);
 
         println!(
             "Starting connection. Current number is: {} <-----",
-            *n_counter
+            counter.load(Ordering::Relaxed)
         );
-
-        drop(n_counter);
 
         match accept_async(stream).await {
             Ok(ws_stream) => {
@@ -42,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: Arc<Mutex<usize>>) {
+async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: Arc<AtomicU32>) {
     let (mut write, mut read) = ws_stream.split();
     let (msg_tx, mut msg_rx) = mpsc::channel::<Message>(1);
     let (pong_tx, mut pong_rx) = mpsc::channel::<bool>(1);
@@ -82,9 +81,9 @@ async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: A
                         match message {
                             Ok(Message::Text(txt)) => {
                                 println!("Message recieved: {}", txt);
-                                if let Err(_e) = msg_tx
-                                    .send(Message::Text(format!("Server response: {}", txt).into()))
-                                    .await { break; }
+                                //if let Err(_e) = msg_tx
+                                //    .send(Message::Text(format!("Server response: {}", txt).into()))
+                                //    .await { break; }
                             }
                             Ok(Message::Ping(data)) => {
                                 println!("Ping recieved!");
@@ -134,7 +133,7 @@ async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: A
                         .await { break; }
 
                     let pong_timer =
-                        tokio::time::timeout(Duration::from_secs(10), pong_rx.recv()).await;
+                        tokio::time::timeout(Duration::from_secs(60), pong_rx.recv()).await;
 
                     match pong_timer {
                         Ok(_) => {
@@ -168,13 +167,10 @@ async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: A
     drop(msg_tx);
     println!("Ok... another connection closed!");
 
-    let mut n_counter = counter.lock().await;
-    *n_counter -= 1;
+    counter.fetch_sub(1, Ordering::Relaxed);
 
     println!(
         "------> CLOSED CONNECTION. Current number is: {} <-----",
-        *n_counter
+        counter.load(Ordering::Relaxed)
     );
-
-    drop(n_counter);
 }
