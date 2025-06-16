@@ -58,8 +58,8 @@ impl ErrorLog {
         })
     }
 
-    fn count_ws_err(&self, error: Box<WsError>) {
-        match *error {
+    fn count_ws_err(&self, error: WsError) {
+        match error {
             WsError::ConnectionClosed => {
                 self.connection_closed.fetch_add(1, Ordering::Relaxed);
             }
@@ -75,7 +75,8 @@ impl ErrorLog {
             WsError::Capacity(_) => {
                 self.capacity.fetch_add(1, Ordering::Relaxed);
             }
-            WsError::Protocol(_) => {
+            WsError::Protocol(inner) => {
+                println!("Met PROTOCOL ERR: {}", inner);
                 self.protocol.fetch_add(1, Ordering::Relaxed);
             }
             WsError::WriteBufferFull(_) => {
@@ -130,7 +131,7 @@ impl ErrorLog {
     pub fn count(&self, error: WsGatorError) {
         match error {
             WsGatorError::WsError(inner) => {
-                self.count_ws_err(inner);
+                self.count_ws_err(*inner);
             }
 
             WsGatorError::MpscChannel(inner) => {

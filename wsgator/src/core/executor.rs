@@ -1,7 +1,6 @@
 use crate::{AttackStrategy, CommonConfig};
 use futures::stream;
 use futures::stream::StreamExt;
-use futures::SinkExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -9,7 +8,7 @@ use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::task::JoinSet;
 use tokio::time::Duration;
 use tokio_tungstenite::tungstenite::Error as WsError;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::connect_async;
 pub struct Executor;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
@@ -22,8 +21,7 @@ type ConnectionTaskFuture =
     Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send + 'static>>;
 
 impl Executor {
-    async fn get_ws_connection(
-        &self,
+    pub async fn get_ws_connection(
         url: &str,
     ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, WsError> {
         let (ws, _) = connect_async(url).await?;
@@ -45,8 +43,6 @@ impl Executor {
         (stop_rx, task)
     }
 
-    // TODO I need to fix weird logic behind opening a ws and "spawning" it
-
     pub async fn get_connections(
         &self,
         strategy: Arc<dyn AttackStrategy + Send>,
@@ -61,25 +57,8 @@ impl Executor {
                     let stop_rx = stop_rx.clone();
 
                     async move {
-                        let ws = match self.get_ws_connection(&con.url_under_fire).await {
-                            Ok(mut ws) => {
-                                // Sending hello
-                                if let Err(e) =
-                                    ws.send(Message::Text(format!("Peer {}", i).into())).await
-                                {
-                                    println!("Send err: {}, On connection: {}", e, i);
-                                    return Err(e);
-                                }
-                                ws
-                            }
-                            Err(e) => {
-                                println!("Connection failed: {}", e);
-                                return Err(e);
-                            }
-                        };
-
                         // Returning future from strategy
-                        Ok(strategy.get_task(ws, stop_rx, i))
+                        Ok(strategy.get_task(con.url_under_fire.clone(), stop_rx, i))
                     }
                 })
                 .buffer_unordered(1000)

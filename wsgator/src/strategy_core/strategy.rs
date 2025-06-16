@@ -1,4 +1,5 @@
 use crate::core::error::WsGatorError;
+use crate::core::executor::Executor;
 use crate::CommonConfig;
 use async_trait::async_trait;
 use futures::future;
@@ -44,6 +45,9 @@ pub trait AttackStrategy: Send + Sync {
         })
     }
 
+    // We getting protocol Error - Sending after close on END...
+    // Probably an issue with Close::Frame or dropping a part of socket
+
     fn get_writer(
         &self,
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
@@ -60,7 +64,7 @@ pub trait AttackStrategy: Send + Sync {
 
     fn get_task(
         self: Arc<Self>,
-        ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+        url: String,
         mut stop_rx: WatchReceiver<bool>,
         i: u32,
     ) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send + 'static>>
@@ -68,10 +72,13 @@ pub trait AttackStrategy: Send + Sync {
         Self: 'static,
     {
         Box::pin(async move {
+            let ws = Executor::get_ws_connection(&url).await?;
             let (sink, mut stream) = ws.split();
-            let (writer_tx, writer_rx) = mpsc::channel::<Message>(10000);
+            let (writer_tx, writer_rx) = mpsc::channel::<Message>(128);
             let writer = self.get_writer(sink, writer_rx);
+            
 
+            // Spawning parallel tasks
             let writer_handler = tokio::spawn(writer);
             let special_event_handle = tokio::spawn(
                 self.clone()
@@ -95,8 +102,8 @@ pub trait AttackStrategy: Send + Sync {
                     }
                     result = stop_rx.changed() => {
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
-                        writer_tx.send(Message::Close(None)).await.map_err(|e| {
-                            WsGatorError::MpscChannel(e.into())})?;
+     //                   writer_tx.send(Message::Close(None)).await.map_err(|e| {
+     //                       WsGatorError::MpscChannel(e.into())})?;
                         drop(writer_tx);
                         break Ok(());
                     }
