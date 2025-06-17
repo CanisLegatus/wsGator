@@ -28,6 +28,14 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
+    fn get_start_logic(&self) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>>>>{
+        Box::pin(
+            async move {
+
+                Ok(())
+            }
+        )
+    } 
     fn prepare_special_events(
         self: Arc<Self>,
         _: MpscSender<Message>,
@@ -44,9 +52,6 @@ pub trait AttackStrategy: Send + Sync {
             }
         })
     }
-
-    // We getting protocol Error - Sending after close on END...
-    // Probably an issue with Close::Frame or dropping a part of socket
 
     fn get_writer(
         &self,
@@ -102,8 +107,6 @@ pub trait AttackStrategy: Send + Sync {
                     }
                     result = stop_rx.changed() => {
                         result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
-     //                   writer_tx.send(Message::Close(None)).await.map_err(|e| {
-     //                       WsGatorError::MpscChannel(e.into())})?;
                         drop(writer_tx);
                         break Ok(());
                     }
