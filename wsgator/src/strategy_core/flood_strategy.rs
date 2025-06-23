@@ -1,6 +1,6 @@
-use crate::core::error::WsGatorError;
 use crate::AttackStrategy;
 use crate::CommonConfig;
+use crate::core::error::WsGatorError;
 use async_trait::async_trait;
 use std::pin::Pin;
 use std::sync::Arc;

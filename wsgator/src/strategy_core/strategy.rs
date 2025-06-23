@@ -1,12 +1,13 @@
-use crate::core::error::WsGatorError;
-use crate::core::executor::Executor;
 use crate::CommonConfig;
+use crate::core::error::WsGatorError;
+use crate::core::error_log::ErrorLog;
+use crate::core::executor::Executor;
 use async_trait::async_trait;
+use futures::SinkExt;
+use futures::StreamExt;
 use futures::future;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
-use futures::SinkExt;
-use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -14,9 +15,17 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver as MpscReceiver;
 use tokio::sync::mpsc::Sender as MpscSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
-use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tokio::task::JoinSet;
+use tokio::time::Duration;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+
+type TasksVector =
+    Vec<Result<Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>, WsError>>;
+type TasksRunner =
+    Pin<Box<dyn Future<Output = Result<JoinSet<Result<(), WsGatorError>>, WsGatorError>> + Send>>;
+
 // Enumiration for TypeChecking while getting user input from CLI
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum AttackStrategyType {
@@ -28,14 +37,30 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
-    fn get_start_logic(&self) -> Pin<Box<dyn Future<Output = Result<(), WsGatorError>>>>{
-        Box::pin(
-            async move {
+    fn get_start_logic(
+        &self,
+        tasks: TasksVector,
+        config: Arc<CommonConfig>,
+        log: Arc<ErrorLog>,
+    ) -> TasksRunner {
+        Box::pin(async move {
+            let mut join_set = JoinSet::new();
 
-                Ok(())
+            for task in tasks {
+                match task {
+                    Ok(task) => {
+                        tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
+                        join_set.spawn(task);
+                    }
+                    Err(e) => {
+                        log.count(e.into());
+                    }
+                }
             }
-        )
-    } 
+
+            Ok(join_set)
+        })
+    }
     fn prepare_special_events(
         self: Arc<Self>,
         _: MpscSender<Message>,
@@ -81,7 +106,6 @@ pub trait AttackStrategy: Send + Sync {
             let (sink, mut stream) = ws.split();
             let (writer_tx, writer_rx) = mpsc::channel::<Message>(128);
             let writer = self.get_writer(sink, writer_rx);
-            
 
             // Spawning parallel tasks
             let writer_handler = tokio::spawn(writer);

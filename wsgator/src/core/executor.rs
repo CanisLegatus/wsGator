@@ -5,10 +5,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::sync::watch::Receiver as WatchReceiver;
-use tokio::task::JoinSet;
 use tokio::time::Duration;
-use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Error as WsError;
 pub struct Executor;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
@@ -72,15 +71,14 @@ impl Executor {
         &self,
         strategy: Arc<dyn AttackStrategy + Send + Sync>,
         log: Arc<ErrorLog>,
-    ) -> Result<(), WsError> {
+    ) -> Result<(), WsGatorError> {
         let config = strategy.get_common_config();
 
         for _wave in 0..config.waves_number {
             let con = Arc::clone(&config);
-            let mut join_set = JoinSet::new();
 
             // Creating independent watch_channel to stop all tasks extenally
-            let (stop_rx, timer_task) = Self::get_timer_task(con);
+            let (stop_rx, timer_task) = Self::get_timer_task(con.clone());
             let tasks = self
                 .get_connections(strategy.clone(), config.clone(), stop_rx)
                 .await?;
@@ -89,19 +87,11 @@ impl Executor {
             tokio::time::sleep(Duration::from_secs(3)).await;
             println!("--->>🐊 BITE! 🐊<<---");
 
-            // Waves logic
-            // Spawning collected tasks
-            for task in tasks {
-                match task {
-                    Ok(task) => {
-                        tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
-                        join_set.spawn(task);
-                    }
-                    Err(e) => {
-                        log.count(e.into());
-                    }
-                }
-            }
+            // Getting run logic
+            let runner = strategy.get_start_logic(tasks, con, log.clone());
+
+            // Running tasks and collecting them to join_set
+            let mut join_set = runner.await?;
 
             // Spawning timer
             tokio::spawn(timer_task);
