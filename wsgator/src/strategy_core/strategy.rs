@@ -37,6 +37,8 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
+    
+    // Creating task-runner default logic
     fn get_start_logic(
         &self,
         tasks: TasksVector,
@@ -61,6 +63,8 @@ pub trait AttackStrategy: Send + Sync {
             Ok(join_set)
         })
     }
+
+    // Creating defatult special task
     fn prepare_special_events(
         self: Arc<Self>,
         _: MpscSender<Message>,
@@ -114,6 +118,7 @@ pub trait AttackStrategy: Send + Sync {
                     .prepare_special_events(writer_tx.clone(), stop_rx.clone()),
             );
 
+            // Mail logic default loop of a task
             let result = loop {
                 tokio::select! {
                     result = self.run_base_events(&mut stream, &writer_tx, i) => {
