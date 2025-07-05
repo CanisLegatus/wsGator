@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tokio::spawn(handle_ws(ws_stream, counter.clone()));
             }
             Err(e) => {
-                println!("WebSocket connection Error: {}", e);
+                println!("WebSocket connection Error: {e}");
                 continue;
             }
         }
@@ -79,7 +79,7 @@ async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: A
                     Some(message) = read.next() => {
                         match message {
                             Ok(Message::Text(txt)) => {
-                                println!("Message recieved: {}", txt);
+                                println!("Message recieved: {txt}");
                                 //if let Err(_e) = msg_tx
                                 //    .send(Message::Text(format!("Server response: {}", txt).into()))
                                 //    .await { break; }
