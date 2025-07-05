@@ -74,9 +74,15 @@ impl Executor {
         strategy: Arc<dyn AttackStrategy + Send + Sync>,
         log: Arc<ErrorLog>,
     ) -> Result<(), WsGatorError> {
+        println!("--->> STARTING IN 3 SECONDS <<---");
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        println!("--->>🐊 BITE! 🐊<<---");
+
         let config = strategy.get_common_config();
 
-        for _wave in 0..config.waves_number {
+        for wave in 0..config.waves_number {
+            println!("---> Wave PREP stage...");
+
             let con = Arc::clone(&config);
 
             // Creating independent watch_channel to stop all tasks extenally
@@ -85,34 +91,33 @@ impl Executor {
                 .get_connections(strategy.clone(), config.clone(), stop_rx)
                 .await?;
 
-            println!("--->> STARTING IN 3 SECONDS <<---");
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            println!("--->>🐊 BITE! 🐊<<---");
-
             // Getting run logic
             let runner = strategy.get_start_logic(tasks, con, log.clone());
 
-            // Running tasks and collecting them to join_set
-            let mut join_set = runner.await?;
+            println!("---> Wave ATTACK stage...");
 
             // Spawning timer
             tokio::spawn(timer_task);
 
+            // Running tasks and collecting them to join_set
+            let mut join_set = runner.await?;
+
             // Handling errors in async tasks
-            while let Some(res) = join_set.join_next().await {
-                match res {
+            while let Some(result_of_async_task) = join_set.join_next().await {
+                match result_of_async_task {
                     Ok(Ok(())) => continue,
                     Ok(Err(e)) => {
                         log.count(e);
                     }
                     Err(join_error) => {
-                        println!("Join Error! Error: {}", join_error);
+                        println!("Join Error! Error: {join_error}");
                     }
                 }
             }
 
             // Waves delay timer
             tokio::time::sleep(Duration::from_secs(config.waves_pause)).await;
+            println!("---> Wave {} is completed!", wave + 1);
         }
         Ok(())
     }

@@ -20,10 +20,10 @@ impl Error for WsGatorError {}
 impl Display for WsGatorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WsGatorError::MpscChannel(inner) => write!(f, "MPSC Channel error: {}", inner),
-            WsGatorError::WatchChannel(inner) => write!(f, "Watch Channel error: {}", inner),
-            WsGatorError::WsError(inner) => write!(f, "Web Socket Error: {}", inner),
-            WsGatorError::JoinError(inner) => write!(f, "JoinError Error: {}", inner),
+            WsGatorError::MpscChannel(inner) => write!(f, "MPSC Channel error: {inner}"),
+            WsGatorError::WatchChannel(inner) => write!(f, "Watch Channel error: {inner}"),
+            WsGatorError::WsError(inner) => write!(f, "Web Socket Error: {inner}"),
+            WsGatorError::JoinError(inner) => write!(f, "JoinError Error: {inner}"),
         }
     }
 }
@@ -87,10 +87,10 @@ impl From<TryRecvError> for MpscChannelError {
 impl Display for MpscChannelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MpscChannelError::Send(inner) => write!(f, "Send error: {:?}", inner),
-            MpscChannelError::TrySend(inner) => write!(f, "Try Send error: {:?}", inner),
-            MpscChannelError::SendTimeout(inner) => write!(f, "Send Timeout error: {:?}", inner),
-            MpscChannelError::TryRecv(inner) => write!(f, "Try Recieve error: {:?}", inner),
+            MpscChannelError::Send(inner) => write!(f, "Send error: {inner}"),
+            MpscChannelError::TrySend(inner) => write!(f, "Try Send error: {inner}"),
+            MpscChannelError::SendTimeout(inner) => write!(f, "Send Timeout error: {inner}"),
+            MpscChannelError::TryRecv(inner) => write!(f, "Try Recieve error: {inner}"),
         }
     }
 }
@@ -116,8 +116,8 @@ impl From<RecvError> for WatchChannelError {
 impl Display for WatchChannelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WatchChannelError::Send(inner) => write!(f, "Send error: {:?}", inner),
-            WatchChannelError::Recv(inner) => write!(f, "Receive error: {:?}", inner),
+            WatchChannelError::Send(inner) => write!(f, "Send error: {inner}"),
+            WatchChannelError::Recv(inner) => write!(f, "Receive error: {inner}"),
         }
     }
 }

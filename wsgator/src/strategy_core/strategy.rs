@@ -1,13 +1,13 @@
-use crate::CommonConfig;
 use crate::core::error::WsGatorError;
 use crate::core::error_log::ErrorLog;
 use crate::core::executor::Executor;
+use crate::CommonConfig;
 use async_trait::async_trait;
-use futures::SinkExt;
-use futures::StreamExt;
 use futures::future;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
+use futures::SinkExt;
+use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -17,13 +17,13 @@ use tokio::sync::mpsc::Sender as MpscSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::task::JoinSet;
 use tokio::time::Duration;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-type TasksVector =
+pub type TasksVector =
     Vec<Result<Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>, WsError>>;
-type TasksRunner =
+pub type TasksRunner =
     Pin<Box<dyn Future<Output = Result<JoinSet<Result<(), WsGatorError>>, WsGatorError>> + Send>>;
 
 // Enumiration for TypeChecking while getting user input from CLI
@@ -37,7 +37,7 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
-    
+
     // Creating task-runner default logic
     fn get_start_logic(
         &self,
@@ -91,7 +91,6 @@ pub trait AttackStrategy: Send + Sync {
             while let Some(message) = writer_rx.recv().await {
                 sink.send(message).await?;
             }
-            println!("Writer finished");
             Ok(())
         })
     }
@@ -181,7 +180,6 @@ pub trait AttackStrategy: Send + Sync {
         match msg {
             Ok(message) => match message {
                 Message::Ping(bytes) => Ok((true, Some(Message::Pong(bytes)))),
-
                 Message::Text(_txt) => Ok((true, None)),
                 Message::Close(_) => Ok((false, None)),
 
@@ -189,8 +187,7 @@ pub trait AttackStrategy: Send + Sync {
             },
             Err(e) => {
                 println!(
-                    "Connection {}: Recieved Err inside a message on listening to next message: {}",
-                    connection_number, e
+                    "Connection {connection_number}: Recieved Err inside a message on listening to next message: {e}",
                 );
                 Err(Box::new(e))
             }

@@ -47,5 +47,5 @@ async fn main() {
         _ = executor_task => {}
     }
 
-    println!("Finished working!\nErrors: {:?}", error_log);
+    println!("Finished working!\n{error_log}");
 }

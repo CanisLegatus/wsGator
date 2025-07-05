@@ -1,5 +1,7 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio_tungstenite::tungstenite::error::Error as WsError;
 
 use super::error::{MpscChannelError, WatchChannelError, WsGatorError};
@@ -75,8 +77,7 @@ impl ErrorLog {
             WsError::Capacity(_) => {
                 self.capacity.fetch_add(1, Ordering::Relaxed);
             }
-            WsError::Protocol(inner) => {
-                println!("Met PROTOCOL ERR: {}", inner);
+            WsError::Protocol(_) => {
                 self.protocol.fetch_add(1, Ordering::Relaxed);
             }
             WsError::WriteBufferFull(_) => {
@@ -146,5 +147,77 @@ impl ErrorLog {
                 self.join_err.fetch_add(1, Ordering::Relaxed);
             }
         }
+    }
+}
+
+impl Display for ErrorLog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut result = String::new();
+
+        let mut helpers_map = HashMap::new();
+
+        helpers_map.insert(
+            "Connection closed: ",
+            self.connection_closed.load(Ordering::Relaxed),
+        );
+        helpers_map.insert(
+            "Connection already closed: ",
+            self.already_closed.load(Ordering::Relaxed),
+        );
+        helpers_map.insert("IO: ", self.io.load(Ordering::Relaxed));
+        helpers_map.insert("TLS: ", self.tls.load(Ordering::Relaxed));
+        helpers_map.insert("Capacity: ", self.capacity.load(Ordering::Relaxed));
+        helpers_map.insert("Protocol: ", self.protocol.load(Ordering::Relaxed));
+        helpers_map.insert(
+            "Write Buffer Full: ",
+            self.write_buffer_full.load(Ordering::Relaxed),
+        );
+        helpers_map.insert("UTF8: ", self.utf8.load(Ordering::Relaxed));
+        helpers_map.insert(
+            "Attack Attempt: ",
+            self.attack_attempt.load(Ordering::Relaxed),
+        );
+        helpers_map.insert("URL: ", self.url.load(Ordering::Relaxed));
+        helpers_map.insert("HTTP: ", self.http.load(Ordering::Relaxed));
+        helpers_map.insert("HTTP Format: ", self.http_format.load(Ordering::Relaxed));
+
+        helpers_map.insert("MPSC Send: ", self.mpsc_send.load(Ordering::Relaxed));
+        helpers_map.insert(
+            "MPSC Try Send: ",
+            self.mpsc_try_send.load(Ordering::Relaxed),
+        );
+        helpers_map.insert(
+            "MPSC Send Timeout: ",
+            self.mpsc_send_timeout.load(Ordering::Relaxed),
+        );
+        helpers_map.insert(
+            "MPSC Try Recieve: ",
+            self.mpsc_try_recv.load(Ordering::Relaxed),
+        );
+
+        helpers_map.insert("Watcher Send: ", self.watcher_send.load(Ordering::Relaxed));
+        helpers_map.insert(
+            "Watcher Recieve: ",
+            self.watcher_recv.load(Ordering::Relaxed),
+        );
+
+        helpers_map.insert("Join Error: ", self.join_err.load(Ordering::Relaxed));
+
+        let mut counter = 0;
+
+        for (key, value) in helpers_map {
+            if value > 0 {
+                counter += 1;
+                result += &format!("{counter}: {key}{value}\n");
+            }
+        }
+
+        if result.is_empty() {
+            result += "No Errors Found";
+        } else {
+            result = "Errors Found:\n".to_owned() + &result;
+        }
+
+        write!(f, "{result}")
     }
 }
