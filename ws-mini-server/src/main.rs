@@ -1,4 +1,3 @@
-use futures::lock::Mutex;
 use futures::SinkExt;
 use futures::StreamExt;
 use std::sync::atomic::AtomicU32;
