@@ -42,6 +42,7 @@ impl Executor {
         (stop_rx, task)
     }
 
+    // Getting not yet running connections
     pub async fn get_connections(
         &self,
         strategy: Arc<dyn AttackStrategy + Send>,
@@ -67,6 +68,7 @@ impl Executor {
         Ok(tasks)
     }
 
+    // Main run function of a Executor - major logic is here
     pub async fn run(
         &self,
         strategy: Arc<dyn AttackStrategy + Send + Sync>,
