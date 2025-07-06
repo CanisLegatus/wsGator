@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio_tungstenite::tungstenite::error::Error as WsError;
 
 use super::error::{MpscChannelError, WatchChannelError, WsGatorError};

@@ -1,12 +1,7 @@
 use crate::AttackStrategy;
 use crate::CommonConfig;
-use crate::ErrorLog;
-use crate::TasksRunner;
-use crate::TasksVector;
 use async_trait::async_trait;
 use std::sync::Arc;
-use tokio::task::JoinSet;
-use tokio::time::Duration;
 
 pub struct RampUpStrategy {
     pub common_config: Arc<CommonConfig>,
@@ -16,30 +11,5 @@ pub struct RampUpStrategy {
 impl AttackStrategy for RampUpStrategy {
     fn get_common_config(&self) -> Arc<CommonConfig> {
         self.common_config.clone()
-    }
-
-    fn get_start_logic(
-        &self,
-        tasks: TasksVector,
-        config: Arc<CommonConfig>,
-        log: Arc<ErrorLog>,
-    ) -> TasksRunner {
-        Box::pin(async move {
-            let mut join_set = JoinSet::new();
-
-            for task in tasks {
-                match task {
-                    Ok(task) => {
-                        tokio::time::sleep(Duration::from_millis(config.connection_pause)).await;
-                        join_set.spawn(task);
-                    }
-                    Err(e) => {
-                        log.count(e.into());
-                    }
-                }
-            }
-
-            Ok(join_set)
-        })
     }
 }

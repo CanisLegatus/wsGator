@@ -1,15 +1,15 @@
+use crate::CommonConfig;
 use crate::core::error::WatchChannelError;
 use crate::core::error::WsGatorError;
 use crate::core::error_log::ErrorLog;
 use crate::core::executor::Executor;
-use crate::CommonConfig;
 use async_trait::async_trait;
+use futures::SinkExt;
+use futures::StreamExt;
 use futures::future;
 use futures::stream;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
-use futures::SinkExt;
-use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -20,14 +20,16 @@ use tokio::sync::watch;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::task::JoinSet;
 use tokio::time::Duration;
-use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 pub type TasksVector =
     Vec<Result<Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>, WsError>>;
+
 pub type TasksRunner =
     Pin<Box<dyn Future<Output = Result<JoinSet<Result<(), WsGatorError>>, WsGatorError>> + Send>>;
+
 pub type TimerTask = Pin<Box<dyn Future<Output = Result<(), WatchChannelError>> + Send>>;
 
 pub type ConnectionTaskFuture =
@@ -44,6 +46,28 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
+
+    async fn prepare_strategy(
+        self: Arc<Self>,
+        config: Arc<CommonConfig>,
+        log: Arc<ErrorLog>,
+    ) -> Result<TasksRunner, WsGatorError>
+    where
+        Self: 'static,
+    {
+        let (stop_rx, timer) = self.get_timer_task(config.clone());
+
+        // Creating tasks
+        let tasks = self
+            .clone()
+            .get_connections(config.clone(), stop_rx)
+            .await?;
+
+        // Getting run logic
+        let runner = self.get_start_logic(tasks, timer, config, log);
+
+        Ok(runner)
+    }
 
     // Getting not yet running connections
     async fn get_connections(
@@ -88,11 +112,15 @@ pub trait AttackStrategy: Send + Sync {
     fn get_start_logic(
         &self,
         tasks: TasksVector,
+        timer: TimerTask,
         config: Arc<CommonConfig>,
         log: Arc<ErrorLog>,
     ) -> TasksRunner {
         Box::pin(async move {
             let mut join_set = JoinSet::new();
+
+            // Find way to handle it's handler to executor
+            tokio::spawn(timer);
 
             for task in tasks {
                 match task {
@@ -163,7 +191,7 @@ pub trait AttackStrategy: Send + Sync {
                     .prepare_special_events(writer_tx.clone(), stop_rx.clone()),
             );
 
-            // Mail logic default loop of a task
+            // Main logic default loop of a task
             let result = loop {
                 tokio::select! {
                     result = self.run_base_events(&mut stream, &writer_tx, i) => {

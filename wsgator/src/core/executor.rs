@@ -34,24 +34,13 @@ impl Executor {
         for wave in 0..config.waves_number {
             println!("---> Wave PREP stage...");
 
-            let con = Arc::clone(&config);
-
-            // Creating independent watch_channel to stop all tasks extenally
-            let (stop_rx, timer_task) = strategy.get_timer_task(con.clone());
-
-            // Creating tasks
-            let tasks = strategy
+            // Getting run logic
+            let runner = strategy
                 .clone()
-                .get_connections(config.clone(), stop_rx)
+                .prepare_strategy(config.clone(), log.clone())
                 .await?;
 
-            // Getting run logic
-            let runner = strategy.get_start_logic(tasks, con, log.clone());
-
             println!("---> Wave ATTACK stage...");
-
-            // Spawning timer
-            tokio::spawn(timer_task);
 
             // Running tasks and collecting them to join_set
             let mut join_set = runner.await?;
