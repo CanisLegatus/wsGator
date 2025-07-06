@@ -1,10 +1,5 @@
-use crate::{AttackStrategy, CommonConfig};
-use futures::stream;
-use futures::stream::StreamExt;
-use std::pin::Pin;
+use crate::AttackStrategy;
 use std::sync::Arc;
-use tokio::sync::watch;
-use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::time::Duration;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -13,11 +8,8 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 
-use super::error::WatchChannelError;
 use super::error::WsGatorError;
 use super::error_log::ErrorLog;
-type ConnectionTaskFuture =
-    Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send + 'static>>;
 
 impl Executor {
     pub async fn get_ws_connection(
@@ -25,47 +17,6 @@ impl Executor {
     ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, WsError> {
         let (ws, _) = connect_async(url).await?;
         Ok(ws)
-    }
-
-    pub fn get_timer_task(
-        config: Arc<CommonConfig>,
-    ) -> (
-        WatchReceiver<bool>,
-        Pin<Box<impl Future<Output = Result<(), WatchChannelError>>>>,
-    ) {
-        let (stop_tx, stop_rx) = watch::channel(false);
-        let task = Box::pin(async move {
-            tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
-            stop_tx.send(true)?;
-            Ok(())
-        });
-        (stop_rx, task)
-    }
-
-    // Getting not yet running connections
-    pub async fn get_connections(
-        &self,
-        strategy: Arc<dyn AttackStrategy + Send>,
-        config: Arc<CommonConfig>,
-        stop_rx: WatchReceiver<bool>,
-    ) -> Result<Vec<Result<ConnectionTaskFuture, WsError>>, WsError> {
-        let tasks: Vec<Result<ConnectionTaskFuture, WsError>> =
-            stream::iter(0..config.connection_number)
-                .map(|i| {
-                    let strategy = Arc::clone(&strategy);
-                    let con = Arc::clone(&config);
-                    let stop_rx = stop_rx.clone();
-
-                    async move {
-                        // Returning future from strategy
-                        Ok(strategy.get_task(con.url_under_fire.clone(), stop_rx, i))
-                    }
-                })
-                .buffer_unordered(1000)
-                .collect::<Vec<Result<ConnectionTaskFuture, WsError>>>()
-                .await;
-
-        Ok(tasks)
     }
 
     // Main run function of a Executor - major logic is here
@@ -86,9 +37,12 @@ impl Executor {
             let con = Arc::clone(&config);
 
             // Creating independent watch_channel to stop all tasks extenally
-            let (stop_rx, timer_task) = Self::get_timer_task(con.clone());
-            let tasks = self
-                .get_connections(strategy.clone(), config.clone(), stop_rx)
+            let (stop_rx, timer_task) = strategy.get_timer_task(con.clone());
+
+            // Creating tasks
+            let tasks = strategy
+                .clone()
+                .get_connections(config.clone(), stop_rx)
                 .await?;
 
             // Getting run logic

@@ -1,9 +1,11 @@
+use crate::core::error::WatchChannelError;
 use crate::core::error::WsGatorError;
 use crate::core::error_log::ErrorLog;
 use crate::core::executor::Executor;
 use crate::CommonConfig;
 use async_trait::async_trait;
 use futures::future;
+use futures::stream;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
 use futures::SinkExt;
@@ -14,6 +16,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver as MpscReceiver;
 use tokio::sync::mpsc::Sender as MpscSender;
+use tokio::sync::watch;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::task::JoinSet;
 use tokio::time::Duration;
@@ -25,6 +28,10 @@ pub type TasksVector =
     Vec<Result<Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>, WsError>>;
 pub type TasksRunner =
     Pin<Box<dyn Future<Output = Result<JoinSet<Result<(), WsGatorError>>, WsGatorError>> + Send>>;
+pub type TimerTask = Pin<Box<dyn Future<Output = Result<(), WatchChannelError>> + Send>>;
+
+pub type ConnectionTaskFuture =
+    Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send + 'static>>;
 
 // Enumiration for TypeChecking while getting user input from CLI
 #[derive(clap::ValueEnum, Clone, Copy)]
@@ -37,6 +44,45 @@ pub enum AttackStrategyType {
 #[async_trait]
 pub trait AttackStrategy: Send + Sync {
     fn get_common_config(&self) -> Arc<CommonConfig>;
+
+    // Getting not yet running connections
+    async fn get_connections(
+        self: Arc<Self>,
+        config: Arc<CommonConfig>,
+        stop_rx: WatchReceiver<bool>,
+    ) -> Result<Vec<Result<ConnectionTaskFuture, WsError>>, WsError>
+    where
+        Self: 'static,
+    {
+        let tasks: Vec<Result<ConnectionTaskFuture, WsError>> =
+            stream::iter(0..config.connection_number)
+                .map(|i| {
+                    let con = Arc::clone(&config);
+                    let stop_rx = stop_rx.clone();
+                    let strat = self.clone();
+
+                    async move {
+                        // Returning future from strategy
+                        Ok(strat.get_task(con.url_under_fire.clone(), stop_rx, i))
+                    }
+                })
+                .buffer_unordered(1000)
+                .collect::<Vec<Result<ConnectionTaskFuture, WsError>>>()
+                .await;
+
+        Ok(tasks)
+    }
+
+    // Creating strategy-specific timer
+    fn get_timer_task(&self, config: Arc<CommonConfig>) -> (WatchReceiver<bool>, TimerTask) {
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let task = Box::pin(async move {
+            tokio::time::sleep(Duration::from_secs(config.connection_duration)).await;
+            stop_tx.send(true)?;
+            Ok(())
+        });
+        (stop_rx, task)
+    }
 
     // Creating task-runner default logic
     fn get_start_logic(
