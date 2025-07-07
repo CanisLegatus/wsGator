@@ -64,7 +64,7 @@ pub trait AttackStrategy: Send + Sync {
             .await?;
 
         // Getting run logic
-        let runner = self.get_start_logic(tasks, timer, config, log);
+        let runner = self.get_runner(tasks, timer, config, log);
 
         Ok(runner)
     }
@@ -109,7 +109,7 @@ pub trait AttackStrategy: Send + Sync {
     }
 
     // Creating task-runner default logic
-    fn get_start_logic(
+    fn get_runner(
         &self,
         tasks: TasksVector,
         timer: TimerTask,
@@ -119,7 +119,8 @@ pub trait AttackStrategy: Send + Sync {
         Box::pin(async move {
             let mut join_set = JoinSet::new();
 
-            // Find way to handle it's handler to executor
+            // Spawning an external stop timer
+            // Timer will destroy itself if all stop_rx will be dropped
             tokio::spawn(timer);
 
             for task in tasks {
