@@ -1,15 +1,16 @@
 use crate::AttackStrategy;
 use std::sync::Arc;
-use tokio::time::Duration;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Error as WsError;
-pub struct Executor;
 use tokio::net::TcpStream;
+use tokio::time::Duration;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Error as WsError;
 
 use super::error::WsGatorError;
 use super::error_log::ErrorLog;
+
+pub struct Executor;
 
 impl Executor {
     pub async fn get_ws_connection(
@@ -20,6 +21,9 @@ impl Executor {
     }
 
     // Main run function of a Executor - major logic is here
+    // TODO - UNDER HEAVY CONSTRUCTION
+    // Collect all modules (Behaviour, Runner, Monitor in ClientContext)
+    // Connect it and run
     pub async fn run(
         &self,
         strategy: Arc<dyn AttackStrategy + Send + Sync>,

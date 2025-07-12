@@ -1,13 +1,19 @@
-use crate::AttackStrategyType;
+use crate::configs::config_types::*;
 use clap::Parser;
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 pub struct Args {
     #[clap(short, long, default_value = "ws://localhost:9001")]
     pub url: String,
 
-    #[clap(short, long, value_enum, default_value_t = AttackStrategyType::Flat)]
+    #[clap(short, long, value_enum, default_value_t = AttackStrategyType::NoChoice)]
     pub strategy: AttackStrategyType,
+
+    #[clap(short, long, value_enum, default_value_t = RunnerType::NoChoice)]
+    pub runner: RunnerType,
+
+    #[clap(short, long, value_enum, default_value_t = BehaviourType::NoChoice)]
+    pub behavior: BehaviourType,
 
     // Connections number
     #[arg(long, default_value = "100", value_parser = clap::value_parser!(u32).range(1..))]

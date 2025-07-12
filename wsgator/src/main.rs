@@ -1,4 +1,10 @@
+use crate::configs::config_types::*;
 use clap::Parser;
+use core::behaviour::*;
+use core::n_executor::NExecutor;
+use core::runner::LinearRunner;
+use core::runner::RampUpRunner;
+use core::runner::Runner;
 use std::sync::Arc;
 
 mod configs;
@@ -10,6 +16,11 @@ use configs::common_config::*;
 use core::error_log::*;
 use core::executor::*;
 use strategy_core::{flat_strategy::*, flood_strategy::*, ramp_up_strategy::*, strategy::*};
+
+type Factories = (
+    Box<dyn Fn() -> Box<dyn Runner>>,
+    Box<dyn Fn() -> Box<dyn Behaviour>>,
+);
 
 fn get_strategy(args: Args) -> Arc<dyn AttackStrategy + Send + Sync> {
     match args.strategy {
@@ -23,14 +34,39 @@ fn get_strategy(args: Args) -> Arc<dyn AttackStrategy + Send + Sync> {
             spam_pause: args.spam_pause,
             common_config: Arc::new(CommonConfig::from(args).with_external_timer()),
         }),
+        AttackStrategyType::NoChoice => Arc::new(FlatStrategy {
+            common_config: Arc::new(CommonConfig::from(args).with_external_timer()),
+        }),
     }
+}
+
+fn get_factories(args: Args) -> Factories {
+    let runner_factory = {
+        match args.strategy {
+            AttackStrategyType::NoChoice => || Box::new(LinearRunner {}) as Box<dyn Runner>,
+            AttackStrategyType::Flat => || Box::new(LinearRunner {}) as Box<dyn Runner>,
+            AttackStrategyType::RampUp => || Box::new(RampUpRunner {}) as Box<dyn Runner>,
+            AttackStrategyType::Flood => || Box::new(LinearRunner {}) as Box<dyn Runner>,
+        }
+    };
+
+    let behaviour_factory = {
+        match args.behavior {
+            BehaviourType::NoChoice => || Box::new(PingPongBehaviour {}) as Box<dyn Behaviour>,
+            BehaviourType::PingPong => || Box::new(PingPongBehaviour {}) as Box<dyn Behaviour>,
+            BehaviourType::Silent => || Box::new(SilentBehaviour {}) as Box<dyn Behaviour>,
+            BehaviourType::Flood => || Box::new(FloodBehaviour {}) as Box<dyn Behaviour>,
+        }
+    };
+
+    (Box::new(runner_factory), Box::new(behaviour_factory))
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
     let error_log = ErrorLog::new();
-    let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args);
+    let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.clone());
 
     let executor_task = tokio::spawn({
         let error_log = Arc::clone(&error_log);
@@ -41,6 +77,10 @@ async fn main() {
             let _ = executor.run(strategy, Arc::clone(&error_log)).await;
         }
     });
+
+    // New implementations
+    let (runner_factory, behaviour_factory) = get_factories(args);
+    let _executor = NExecutor::new(runner_factory, behaviour_factory);
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
