@@ -4,6 +4,12 @@ use tokio_tungstenite::{
     connect_async, tungstenite::Error as WsError, MaybeTlsStream, WebSocketStream,
 };
 
+// Runner 
+// Algorithm of a load 
+// Creation and management of connection pool 
+// Passing params to ClientContext
+
+
 #[async_trait]
 pub trait Runner: Send + Sync {
     async fn get_ws_connection(

@@ -40,7 +40,7 @@ fn get_strategy(args: Args) -> Arc<dyn AttackStrategy + Send + Sync> {
     }
 }
 
-fn get_factories(args: Args) -> Factories {
+pub fn get_factories(args: &Args) -> Factories {
     let runner_factory = {
         match args.strategy {
             AttackStrategyType::NoChoice => || Box::new(LinearRunner {}) as Box<dyn Runner>,
@@ -79,13 +79,16 @@ async fn main() {
     });
 
     // New implementations
-    let (runner_factory, behaviour_factory) = get_factories(args);
-    let _executor = NExecutor::new(runner_factory, behaviour_factory);
+    let _executor = NExecutor::from_args(args);
 
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = executor_task => {}
+        _ = tokio::signal::ctrl_c() => {
+            println!("\n---> Interrupted by ctrl + c");
+        }
+        _ = executor_task => {
+            println!("---> Executor finished normally...");
+        }
     }
 
-    println!("Finished working!\n{error_log}");
+    println!("---> Logs:\n{error_log}");
 }
