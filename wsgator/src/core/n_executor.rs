@@ -1,9 +1,9 @@
+use super::{behaviour::Behaviour, runner::Runner};
+use crate::ConnectionTaskFuture;
 use crate::{configs::cmd_args::Args, get_factories};
 use futures::StreamExt;
-use tokio::sync::watch;
-use crate::ConnectionTaskFuture;
-use super::{behaviour::Behaviour, runner::Runner};
 use futures::stream;
+use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Error as WsError;
 
 pub struct NExecutor {
@@ -13,12 +13,11 @@ pub struct NExecutor {
 }
 //  Executor
 //  Starts the test
-//  Uses waves 
+//  Uses waves
 //  Collects Errors
 //  Control TimeBounds
 
 impl NExecutor {
-
     pub fn from_args(args: Args) -> Self {
         let (runner, behaviour) = get_factories(&args);
 
@@ -30,11 +29,7 @@ impl NExecutor {
     }
 
     pub async fn run(&self) {
-       
         // Starting wave
-        for wave in 0..self.waves_number {
-
-        }
+        for wave in 0..self.waves_number {}
     }
-
 }

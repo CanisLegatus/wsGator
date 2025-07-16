@@ -2,9 +2,11 @@ use crate::configs::config_types::*;
 use clap::Parser;
 use core::behaviour::*;
 use core::n_executor::NExecutor;
+use core::runner::CommonRunnerConfig;
 use core::runner::LinearRunner;
 use core::runner::RampUpRunner;
 use core::runner::Runner;
+use std::env::args;
 use std::sync::Arc;
 
 mod configs;
@@ -41,12 +43,33 @@ fn get_strategy(args: Args) -> Arc<dyn AttackStrategy + Send + Sync> {
 }
 
 pub fn get_factories(args: &Args) -> Factories {
+    let common_runner_config = CommonRunnerConfig {
+        url: args.url.clone(),
+        connection_number: args.connection_number,
+    };
+
     let runner_factory = {
         match args.strategy {
-            AttackStrategyType::NoChoice => || Box::new(LinearRunner {}) as Box<dyn Runner>,
-            AttackStrategyType::Flat => || Box::new(LinearRunner {}) as Box<dyn Runner>,
-            AttackStrategyType::RampUp => || Box::new(RampUpRunner {}) as Box<dyn Runner>,
-            AttackStrategyType::Flood => || Box::new(LinearRunner {}) as Box<dyn Runner>,
+            AttackStrategyType::NoChoice => Box::new(|| {
+                Box::new(LinearRunner {
+                    common_config: common_runner_config,
+                }) as Box<dyn Runner>
+            }),
+            AttackStrategyType::Flat => Box::new(|| {
+                Box::new(LinearRunner {
+                    common_config: common_runner_config,
+                }) as Box<dyn Runner>
+            }),
+            AttackStrategyType::RampUp => Box::new(|| {
+                Box::new(RampUpRunner {
+                    common_config: common_runner_config,
+                }) as Box<dyn Runner>
+            }),
+            AttackStrategyType::Flood => Box::new(|| {
+                Box::new(LinearRunner {
+                    common_config: common_runner_config,
+                }) as Box<dyn Runner>
+            }),
         }
     };
 

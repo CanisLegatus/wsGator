@@ -1,15 +1,15 @@
+use crate::CommonConfig;
 use crate::core::error::WatchChannelError;
 use crate::core::error::WsGatorError;
 use crate::core::error_log::ErrorLog;
 use crate::core::executor::Executor;
-use crate::CommonConfig;
 use async_trait::async_trait;
+use futures::SinkExt;
+use futures::StreamExt;
 use futures::future;
 use futures::stream;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
-use futures::SinkExt;
-use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -20,9 +20,9 @@ use tokio::sync::watch;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::task::JoinSet;
 use tokio::time::Duration;
-use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 pub type TasksVector =
     Vec<Result<Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>, WsError>>;
