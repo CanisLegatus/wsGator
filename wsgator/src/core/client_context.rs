@@ -1,7 +1,8 @@
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
 use crate::Arc;
-use tokio::sync::mpsc::{ Receiver as MpscReceiver, Sender as MpscSender };
+use tokio::sync::mpsc::Sender as MpscSender;
+use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::tungstenite::Message;
 
 // Client Context 
@@ -14,13 +15,13 @@ pub struct ClientContext {
     url: String,
     id: u32,
     writer_sender: MpscSender<Message>,
-    stop_reciever: MpscReceiver<bool>,
+    stop_reciever: WatchReceiver<bool>,
     behaviour: Arc<dyn Behaviour>,
     monitor: Arc<Monitor>,
 }
 
 impl ClientContext {
-    pub fn new(url: String, id: u32, writer_sender: MpscSender<Message>, stop_reciever: MpscReceiver<bool>, behaviour: Arc<dyn Behaviour>, monitor: Arc<Monitor>) -> Self {
+    pub fn new(url: String, id: u32, writer_sender: MpscSender<Message>, stop_reciever: WatchReceiver<bool>, behaviour: Arc<dyn Behaviour>, monitor: Arc<Monitor>) -> Self {
         Self {
             url,
             id,
@@ -31,7 +32,6 @@ impl ClientContext {
         }
     }
     
-    pub async fn connect(&self) {}
     pub async fn run(&self) {}
     pub async fn send_message(&self) {}
     pub async fn shutdown(&self) {}

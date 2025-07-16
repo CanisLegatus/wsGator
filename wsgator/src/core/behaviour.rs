@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait Behaviour {}
+pub trait Behaviour: Send + Sync {}
 
 // Structs
 
