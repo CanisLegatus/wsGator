@@ -6,7 +6,6 @@ use core::runner::CommonRunnerConfig;
 use core::runner::LinearRunner;
 use core::runner::RampUpRunner;
 use core::runner::Runner;
-use std::env::args;
 use std::sync::Arc;
 
 mod configs;
@@ -48,26 +47,26 @@ pub fn get_factories(args: &Args) -> Factories {
         connection_number: args.connection_number,
     };
 
-    let runner_factory = {
+    let runner_factory: Box<dyn Fn() -> Box<dyn Runner>> = {
         match args.strategy {
-            AttackStrategyType::NoChoice => Box::new(|| {
+            AttackStrategyType::NoChoice => Box::new(move || {
                 Box::new(LinearRunner {
-                    common_config: common_runner_config,
+                    common_config: common_runner_config.clone(),
                 }) as Box<dyn Runner>
             }),
-            AttackStrategyType::Flat => Box::new(|| {
+            AttackStrategyType::Flat => Box::new(move || {
                 Box::new(LinearRunner {
-                    common_config: common_runner_config,
+                    common_config: common_runner_config.clone(),
                 }) as Box<dyn Runner>
             }),
-            AttackStrategyType::RampUp => Box::new(|| {
+            AttackStrategyType::RampUp => Box::new(move || {
                 Box::new(RampUpRunner {
-                    common_config: common_runner_config,
+                    common_config: common_runner_config.clone(),
                 }) as Box<dyn Runner>
             }),
-            AttackStrategyType::Flood => Box::new(|| {
+            AttackStrategyType::Flood => Box::new(move || {
                 Box::new(LinearRunner {
-                    common_config: common_runner_config,
+                    common_config: common_runner_config.clone(),
                 }) as Box<dyn Runner>
             }),
         }
