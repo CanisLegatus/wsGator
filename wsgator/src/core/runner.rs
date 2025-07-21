@@ -17,34 +17,35 @@ use super::monitor::Monitor;
 pub trait Runner: Send + Sync {
     fn get_common_config(&self) -> &CommonRunnerConfig;
 
+    // What we do here exactly? Hmm... Client context here is not a config! It's an active actor
     fn collect_clients(&self) -> Vec<ClientContext> {
         let common_config = self.get_common_config();
         let (stop_tx, stop_rx) = watch::channel(false);
 
         // TODO Add behaviour here... (how to pass it ideomatically?)
 
-        let connections: Vec<ClientContext> = (0..common_config.connection_number)
-            .map(|i| {
+        let clients: Vec<ClientContext> = (0..common_config.connection_number)
+            .map(|id| {
                 // Creating a client context here
-                let (writer_tx, writer_rx) = mpsc::channel::<Message>(128);
-                let client_context = ClientContext::new(
+                ClientContext::new(
                     common_config.url.clone(),
-                    i,
-                    writer_tx,
+                    id,
                     stop_rx.clone(),
                     Arc::new(SilentBehaviour {}),
                     Arc::new(Monitor {}),
-                );
-
-                client_context
+                )
             })
             .collect();
 
-        connections
+        clients
     }
     async fn run(&self) {
         let clients = self.collect_clients();
+        let connections = self.collect_connections();
     }
+
+    fn collect_connections(&self) {}
+
     fn create_task(&self, url: String, stop_rx: WatchReceiver<bool>, i: u32) {}
 }
 

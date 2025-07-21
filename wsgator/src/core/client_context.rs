@@ -5,7 +5,6 @@ use futures::SinkExt;
 use futures::StreamExt;
 use futures::stream::SplitSink;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::Sender as MpscSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -23,7 +22,6 @@ use super::error::WsGatorError;
 pub struct ClientContext {
     url: String,
     id: u32,
-    writer_sender: MpscSender<Message>,
     stop_reciever: WatchReceiver<bool>,
     behaviour: Arc<dyn Behaviour>,
     monitor: Arc<Monitor>,
@@ -33,7 +31,6 @@ impl ClientContext {
     pub fn new(
         url: String,
         id: u32,
-        writer_sender: MpscSender<Message>,
         stop_reciever: WatchReceiver<bool>,
         behaviour: Arc<dyn Behaviour>,
         monitor: Arc<Monitor>,
@@ -41,7 +38,6 @@ impl ClientContext {
         Self {
             url,
             id,
-            writer_sender,
             stop_reciever,
             behaviour,
             monitor,
@@ -73,5 +69,6 @@ impl ClientContext {
             Ok::<(), WsGatorError>(())
         });
     }
+    pub async fn prepare_taks(&self) {}
     pub async fn shutdown(&self) {}
 }
