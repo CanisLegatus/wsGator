@@ -1,8 +1,7 @@
 use crate::Arc;
 use async_trait::async_trait;
 use tokio::sync::watch::Receiver as WatchReceiver;
-use tokio::sync::{mpsc, watch};
-use tokio_tungstenite::tungstenite::Message;
+use tokio::sync::watch;
 
 use super::behaviour::SilentBehaviour;
 use super::client_context::ClientContext;
@@ -40,6 +39,12 @@ pub trait Runner: Send + Sync {
         clients
     }
     async fn run(&self) {
+        
+        // Here we running an stratygy
+        // We have to load Algorithm of an connections
+        // We have to connect context (to make sure that it is gonna be launched at once)
+        // We have to collect them
+
         let clients = self.collect_clients();
         let connections = self.collect_connections();
     }

@@ -57,6 +57,9 @@ impl ClientContext {
         let (sink, stream) = websocket.split();
 
         // Starting loop
+        // Creating real web_socket connection (all)
+        // Creating writer (to ones who need it) (considered in behaviour?)
+        // 
 
         Ok(())
     }
