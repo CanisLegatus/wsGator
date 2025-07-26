@@ -1,7 +1,7 @@
 use crate::Arc;
 use async_trait::async_trait;
-use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::sync::watch;
+use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
 
 use super::behaviour::SilentBehaviour;
 use super::client_context::ClientContext;
@@ -17,7 +17,7 @@ pub trait Runner: Send + Sync {
     fn get_common_config(&self) -> &CommonRunnerConfig;
 
     // What we do here exactly? Hmm... Client context here is not a config! It's an active actor
-    fn collect_clients(&self) -> Vec<ClientContext> {
+    fn collect_clients(&self) -> (Vec<ClientContext>, WatchSender<bool>) {
         let common_config = self.get_common_config();
         let (stop_tx, stop_rx) = watch::channel(false);
 
@@ -36,10 +36,9 @@ pub trait Runner: Send + Sync {
             })
             .collect();
 
-        clients
+        (clients, stop_tx)
     }
     async fn run(&self) {
-        
         // Here we running an stratygy
         // We have to load Algorithm of an connections
         // We have to connect context (to make sure that it is gonna be launched at once)
