@@ -1,3 +1,4 @@
+use super::behaviour;
 use super::{behaviour::Behaviour, runner::Runner};
 use crate::ConnectionTaskFuture;
 use crate::{configs::cmd_args::Args, get_factories};
@@ -30,6 +31,12 @@ impl NExecutor {
 
     pub async fn run(&self) {
         // Starting wave
-        for wave in 0..self.waves_number {}
+        for wave in 0..self.waves_number {
+            // Unpacking everything
+            let behaviour = (*self.behaviour)();
+            let runner = (*self.runner)();
+
+            runner.run(behaviour).await;
+        }
     }
 }

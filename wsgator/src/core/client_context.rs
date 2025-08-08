@@ -23,7 +23,7 @@ pub struct ClientContext {
     url: String,
     id: u32,
     stop_reciever: WatchReceiver<bool>,
-    behaviour: Arc<dyn Behaviour>,
+    behaviour: Arc<Box<dyn Behaviour>>,
     monitor: Arc<Monitor>,
 }
 
@@ -32,7 +32,7 @@ impl ClientContext {
         url: String,
         id: u32,
         stop_reciever: WatchReceiver<bool>,
-        behaviour: Arc<dyn Behaviour>,
+        behaviour: Arc<Box<dyn Behaviour>>,
         monitor: Arc<Monitor>,
     ) -> Self {
         Self {
@@ -59,7 +59,7 @@ impl ClientContext {
         // Starting loop
         // Creating real web_socket connection (all)
         // Creating writer (to ones who need it) (considered in behaviour?)
-        // 
+        //
 
         Ok(())
     }
