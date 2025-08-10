@@ -20,10 +20,6 @@ impl Executor {
         Ok(ws)
     }
 
-    // Main run function of a Executor - major logic is here
-    // TODO - UNDER HEAVY CONSTRUCTION
-    // Collect all modules (Behaviour, Runner, Monitor in ClientContext)
-    // Connect it and run
     pub async fn run(
         &self,
         strategy: Arc<dyn AttackStrategy + Send + Sync>,

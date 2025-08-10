@@ -1,12 +1,13 @@
-use std::time::Duration;
-
+use crate::Arc;
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
-use crate::Arc;
-use futures::stream::SplitSink;
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::stream::SplitSink;
+use std::time::Duration;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender};
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -57,11 +58,15 @@ impl ClientContext {
         // Starting our websocket
         let websocket = self.get_ws_connection().await?;
         let (sink, stream) = websocket.split();
-        self.start_writer(sink);
 
-        // Starting loop
-        // Creating real web_socket connection (all)
-        // Creating writer (to ones who need it) (considered in behaviour?)
+        // Starting message channel
+        let (message_tx, message_rx) = mpsc::channel::<Message>(128);
+
+        // Starting writer
+        let _ = self.start_writer(sink, message_rx);
+
+        // Starting blocking behaviour cycle main_thing (really blocking or spawning?)
+        let _ = self.behaviour.run(self.id, stream, message_tx).await;
 
         Ok(())
     }
@@ -70,12 +75,17 @@ impl ClientContext {
     pub fn start_writer(
         &self,
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    ) {
+        mut message_rx: MpscReceiver<Message>,
+    ) -> Result<(), WsGatorError> {
         tokio::spawn(async move {
-            sink.send(Message::text("Task Started...")).await?;
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            while let Some(message) = message_rx.recv().await {
+                sink.send(message).await?;
+            }
+
             Ok::<(), WsGatorError>(())
         });
+
+        Ok(())
     }
     pub async fn prepare_taks(&self) {}
     pub async fn shutdown(&self) {}

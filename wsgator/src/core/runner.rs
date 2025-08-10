@@ -1,8 +1,9 @@
+use futures::future::join_all;
 use std::time::Duration;
 
 use crate::Arc;
 use async_trait::async_trait;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
 use tokio::task::JoinHandle;
@@ -74,6 +75,7 @@ pub trait Runner: Send + Sync {
     async fn run(&self, behaviour: Box<dyn Behaviour>) {
         let (clients, stop_tx) = self.collect_clients(behaviour);
         let join_handle_vec = self.run_clients(clients, stop_tx).await;
+        join_all(join_handle_vec).await;
     }
 }
 
