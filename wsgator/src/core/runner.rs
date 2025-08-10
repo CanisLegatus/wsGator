@@ -1,10 +1,13 @@
+use std::time::Duration;
+
 use crate::Arc;
 use async_trait::async_trait;
-use futures::{StreamExt, stream};
+use futures::{stream, StreamExt};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
+use tokio::task::JoinHandle;
 
-use super::behaviour::{self, Behaviour, SilentBehaviour};
+use super::behaviour::Behaviour;
 use super::client_context::ClientContext;
 use super::error::WsGatorError;
 use super::monitor::Monitor;
@@ -26,14 +29,13 @@ pub trait Runner: Send + Sync {
         let common_config = self.get_common_config();
         let (stop_tx, stop_rx) = watch::channel(false);
         let behaviour = Arc::new(behaviour);
-        // TODO Add behaviour here... (how to pass it ideomatically?)
 
         let clients: Vec<ClientContext> = (0..common_config.connection_number)
             .map(|id| {
                 // Creating a client context here
                 ClientContext::new(
-                    common_config.url.clone(),
                     id,
+                    common_config.url.clone(),
                     stop_rx.clone(),
                     behaviour.clone(),
                     Arc::new(Monitor {}),
@@ -44,30 +46,35 @@ pub trait Runner: Send + Sync {
         (clients, stop_tx)
     }
 
-    async fn run_clients(&self, clients: Vec<ClientContext>, stop_tx: WatchSender<bool>) {
-        // TODO!
-        // We are having here a wrong approach
-        // We need to start clients
-        let result: Vec<Result<(), WsGatorError>> = stream::iter(clients)
-            .map(|mut client| async move { client.run().await.map_err(WsGatorError::from) })
-            .buffer_unordered(999)
+    // Function to manipulate start runners
+    async fn run_clients(
+        &self,
+        clients: Vec<ClientContext>,
+        stop_tx: WatchSender<bool>,
+    ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
+        // Starting stop task
+
+        let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
+
+        tokio::spawn(async move {
+            let _ = tokio::time::sleep(connection_duration).await;
+            let _ = stop_tx.send(false);
+        });
+
+        stream::iter(clients)
+            .map(|mut client| async move {
+                tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) })
+            })
+            .buffer_unordered(300)
             .collect()
-            .await;
-
+            .await
     }
 
+    // Function to create, run and collect final results from ClientContexts
     async fn run(&self, behaviour: Box<dyn Behaviour>) {
-        // Here we running an stratygy
-        // We have to load Algorithm of an connections
-        // We have to connect context (to make sure that it is gonna be launched at once)
-        // We have to collect them
-
         let (clients, stop_tx) = self.collect_clients(behaviour);
-
-        self.run_clients(clients, stop_tx).await;
+        let join_handle_vec = self.run_clients(clients, stop_tx).await;
     }
-
-    fn create_task(&self, url: String, stop_rx: WatchReceiver<bool>, i: u32) {}
 }
 
 // Structs
@@ -75,6 +82,7 @@ pub trait Runner: Send + Sync {
 pub struct CommonRunnerConfig {
     pub url: String,
     pub connection_number: u32,
+    pub connection_duration: u64,
 }
 
 pub struct LinearRunner {

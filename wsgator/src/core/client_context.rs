@@ -1,9 +1,9 @@
-use crate::Arc;
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
+use crate::Arc;
+use futures::stream::SplitSink;
 use futures::SinkExt;
 use futures::StreamExt;
-use futures::stream::SplitSink;
 use tokio::net::TcpStream;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::connect_async;
@@ -20,8 +20,8 @@ use super::error::WsGatorError;
 // Collecting Errors
 
 pub struct ClientContext {
-    url: String,
     id: u32,
+    url: String,
     stop_reciever: WatchReceiver<bool>,
     behaviour: Arc<Box<dyn Behaviour>>,
     monitor: Arc<Monitor>,
@@ -29,8 +29,8 @@ pub struct ClientContext {
 
 impl ClientContext {
     pub fn new(
-        url: String,
         id: u32,
+        url: String,
         stop_reciever: WatchReceiver<bool>,
         behaviour: Arc<Box<dyn Behaviour>>,
         monitor: Arc<Monitor>,

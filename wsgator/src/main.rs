@@ -45,6 +45,7 @@ pub fn get_factories(args: &Args) -> Factories {
     let common_runner_config = CommonRunnerConfig {
         url: args.url.clone(),
         connection_number: args.connection_number,
+        connection_duration: args.connection_duration,
     };
 
     let runner_factory: Box<dyn Fn() -> Box<dyn Runner>> = {
