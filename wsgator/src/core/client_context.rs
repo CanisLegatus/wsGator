@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
 use crate::Arc;
@@ -36,8 +38,8 @@ impl ClientContext {
         monitor: Arc<Monitor>,
     ) -> Self {
         Self {
-            url,
             id,
+            url,
             stop_reciever,
             behaviour,
             monitor,
@@ -55,20 +57,23 @@ impl ClientContext {
         // Starting our websocket
         let websocket = self.get_ws_connection().await?;
         let (sink, stream) = websocket.split();
+        self.start_writer(sink);
 
         // Starting loop
         // Creating real web_socket connection (all)
         // Creating writer (to ones who need it) (considered in behaviour?)
-        //
 
         Ok(())
     }
-    pub async fn start_writer(
+
+    // Writer - responsible for acting as an Actor - collecting messages from others
+    pub fn start_writer(
         &self,
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     ) {
         tokio::spawn(async move {
-            sink.send(Message::text("LOl")).await?;
+            sink.send(Message::text("Task Started...")).await?;
+            tokio::time::sleep(Duration::from_secs(10)).await;
             Ok::<(), WsGatorError>(())
         });
     }

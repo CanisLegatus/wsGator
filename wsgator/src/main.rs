@@ -89,28 +89,29 @@ pub fn get_factories(args: &Args) -> Factories {
 async fn main() {
     let args = Args::parse();
     let error_log = ErrorLog::new();
-    let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.clone());
+    //let strategy: Arc<dyn AttackStrategy + Send + Sync> = get_strategy(args.clone());
 
-    let executor_task = tokio::spawn({
-        let error_log = Arc::clone(&error_log);
-        let strategy = Arc::clone(&strategy);
+    //let executor_task = tokio::spawn({
+    //    let error_log = Arc::clone(&error_log);
+    //    let strategy = Arc::clone(&strategy);
 
-        async move {
-            let executor = Executor;
-            let _ = executor.run(strategy, Arc::clone(&error_log)).await;
-        }
-    });
+    //    async move {
+    //        let executor = Executor;
+    //        let _ = executor.run(strategy, Arc::clone(&error_log)).await;
+    //    }
+    //});
 
     // New implementations
-    let _executor = NExecutor::from_args(args);
+    let executor = NExecutor::from_args(args);
+    executor.run().await;
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             println!("\n---> Interrupted by ctrl + c");
         }
-        _ = executor_task => {
-            println!("---> Executor finished normally...");
-        }
+        //_ = executor_task => {
+        //    println!("---> Executor finished normally...");
+        //}
     }
 
     println!("---> Logs:\n{error_log}");
