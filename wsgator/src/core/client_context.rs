@@ -25,7 +25,7 @@ use super::error::WsGatorError;
 pub struct ClientContext {
     id: u32,
     url: String,
-    stop_reciever: WatchReceiver<bool>,
+    stop_rx: WatchReceiver<bool>,
     behaviour: Arc<Box<dyn Behaviour>>,
     monitor: Arc<Monitor>,
 }
@@ -34,14 +34,14 @@ impl ClientContext {
     pub fn new(
         id: u32,
         url: String,
-        stop_reciever: WatchReceiver<bool>,
+        stop_rx: WatchReceiver<bool>,
         behaviour: Arc<Box<dyn Behaviour>>,
         monitor: Arc<Monitor>,
     ) -> Self {
         Self {
             id,
             url,
-            stop_reciever,
+            stop_rx,
             behaviour,
             monitor,
         }
@@ -66,7 +66,7 @@ impl ClientContext {
         let _ = self.start_writer(sink, message_rx);
 
         // Starting blocking behaviour cycle main_thing (really blocking or spawning?)
-        let _ = self.behaviour.run(self.id, stream, message_tx).await;
+        let _ = self.behaviour.run(self.id, stream, message_tx, self.stop_rx.clone()).await;
 
         Ok(())
     }
