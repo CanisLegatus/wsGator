@@ -60,10 +60,9 @@ pub trait Behaviour: Send + Sync {
             }
         }
     }
-
-    // Main function of behaviour
+        
     // TODO!
-    // Implement basic behaviour (modules?)
+    // We need error catching
     async fn run(
         &self,
         id: u32,

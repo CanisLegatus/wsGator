@@ -71,6 +71,7 @@ impl ClientContext {
     }
 
     // Writer - responsible for acting as an Actor - collecting messages from others
+    // TODO - Isnt writer should be defined in a behaviour
     pub fn start_writer(
         &self,
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,

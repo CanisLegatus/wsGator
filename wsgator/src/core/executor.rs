@@ -1,11 +1,5 @@
-use super::behaviour;
 use super::{behaviour::Behaviour, runner::Runner};
-use crate::ConnectionTaskFuture;
 use crate::{configs::cmd_args::Args, get_factories};
-use futures::StreamExt;
-use futures::stream;
-use tokio::sync::watch;
-use tokio_tungstenite::tungstenite::Error as WsError;
 
 pub struct Executor {
     waves_number: u32,

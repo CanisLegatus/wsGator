@@ -10,35 +10,14 @@ use std::sync::Arc;
 
 mod configs;
 mod core;
-mod strategy_core;
 
 use configs::cmd_args::*;
-use configs::common_config::*;
 use core::error_log::*;
-use strategy_core::{flat_strategy::*, flood_strategy::*, ramp_up_strategy::*, strategy::*};
 
 type Factories = (
     Box<dyn Fn() -> Box<dyn Runner>>,
     Box<dyn Fn() -> Box<dyn Behaviour>>,
 );
-
-fn get_strategy(args: Args) -> Arc<dyn AttackStrategy + Send + Sync> {
-    match args.strategy {
-        AttackStrategyType::Flat => Arc::new(FlatStrategy {
-            common_config: Arc::new(CommonConfig::from(args).with_external_timer()),
-        }),
-        AttackStrategyType::RampUp => Arc::new(RampUpStrategy {
-            common_config: Arc::new(CommonConfig::from(args)),
-        }),
-        AttackStrategyType::Flood => Arc::new(FloodStrategy {
-            spam_pause: args.spam_pause,
-            common_config: Arc::new(CommonConfig::from(args).with_external_timer()),
-        }),
-        AttackStrategyType::NoChoice => Arc::new(FlatStrategy {
-            common_config: Arc::new(CommonConfig::from(args).with_external_timer()),
-        }),
-    }
-}
 
 pub fn get_factories(args: &Args) -> Factories {
     let common_runner_config = CommonRunnerConfig {

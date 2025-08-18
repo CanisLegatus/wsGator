@@ -56,7 +56,20 @@ pub trait Runner: Send + Sync {
         // Starting stop task
 
         let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
-
+        
+        // TODO!
+        // Timer should be a part of a behaviour somehow
+        // Like it is ok to have timer in runner (probably???)
+        // But when it comes for connections to have individual timers
+        // They can ignore global timer - but it is weird
+        // It's better to have timer somewhere inside...
+        // And probably getting it outside...
+        // But... Hmm
+        // Timer contol which is recieved by runner from context on Behaviour
+        // as a part of initial scheme with Option<OuterTimer?>
+        // But hm...
+        // On_start can create Inner timers but it's not kinda... native?
+        // Need to think about it
         tokio::spawn(async move {
             let _ = tokio::time::sleep(connection_duration).await;
             let _ = stop_tx.send(false);
