@@ -1,7 +1,7 @@
 use crate::configs::config_types::*;
 use clap::Parser;
 use core::behaviour::*;
-use core::n_executor::NExecutor;
+use core::executor::Executor;
 use core::runner::CommonRunnerConfig;
 use core::runner::LinearRunner;
 use core::runner::RampUpRunner;
@@ -15,7 +15,6 @@ mod strategy_core;
 use configs::cmd_args::*;
 use configs::common_config::*;
 use core::error_log::*;
-use core::executor::*;
 use strategy_core::{flat_strategy::*, flood_strategy::*, ramp_up_strategy::*, strategy::*};
 
 type Factories = (
@@ -90,7 +89,7 @@ async fn main() {
     let args = Args::parse();
     let error_log = ErrorLog::new();
 
-    let executor = NExecutor::from_args(args);
+    let executor = Executor::from_args(args);
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {

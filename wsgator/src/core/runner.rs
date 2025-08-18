@@ -75,6 +75,10 @@ pub trait Runner: Send + Sync {
     async fn run(&self, behaviour: Box<dyn Behaviour>) {
         let (clients, stop_tx) = self.collect_clients(behaviour);
         let join_handle_vec = self.run_clients(clients, stop_tx).await;
+        // TODO
+        // Simple yet bad position
+        // Errors should be handled out of every task
+        // Not sure if join_all can handle all of these
         join_all(join_handle_vec).await;
     }
 }

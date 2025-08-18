@@ -172,47 +172,48 @@ pub trait AttackStrategy: Send + Sync {
         Self: 'static,
     {
         Box::pin(async move {
-            let ws = Executor::get_ws_connection(&url).await?;
-            let (sink, mut stream) = ws.split();
-            let (writer_tx, writer_rx) = mpsc::channel::<Message>(128);
-            let writer = self.get_writer(sink, writer_rx);
-
-            // Spawning parallel tasks
-            let writer_handler = tokio::spawn(writer);
-            let special_event_handle = tokio::spawn(
-                self.clone()
-                    .prepare_special_events(writer_tx.clone(), stop_rx.clone()),
-            );
-
-            // Main logic default loop of a task
-            let result = loop {
-                tokio::select! {
-                    result = self.run_base_events(&mut stream, &writer_tx, i) => {
-                        match result {
-                            Ok(false) => {
-                                drop(writer_tx);
-                                break Ok(());
-                            },
-                            Ok(true) => {},
-                            Err(e) => {
-                                drop(writer_tx);
-                                break Err(e);
-                            }
-                        }
-                    }
-                    result = stop_rx.changed() => {
-                        result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
-                        drop(writer_tx);
-                        break Ok(());
-                    }
-                }
-            };
-
-            // Awaiting for everyone to stop
-            special_event_handle.await??;
-            writer_handler.await??;
-
-            result
+            Ok(())
+            // let ws = Executor::get_ws_connection(&url).await?;
+            // let (sink, mut stream) = ws.split();
+            // let (writer_tx, writer_rx) = mpsc::channel::<Message>(128);
+            // let writer = self.get_writer(sink, writer_rx);
+            //
+            // // Spawning parallel tasks
+            // let writer_handler = tokio::spawn(writer);
+            // let special_event_handle = tokio::spawn(
+            //     self.clone()
+            //         .prepare_special_events(writer_tx.clone(), stop_rx.clone()),
+            // );
+            //
+            // // Main logic default loop of a task
+            // let result = loop {
+            //     tokio::select! {
+            //         result = self.run_base_events(&mut stream, &writer_tx, i) => {
+            //             match result {
+            //                 Ok(false) => {
+            //                     drop(writer_tx);
+            //                     break Ok(());
+            //                 },
+            //                 Ok(true) => {},
+            //                 Err(e) => {
+            //                     drop(writer_tx);
+            //                     break Err(e);
+            //                 }
+            //             }
+            //         }
+            //         result = stop_rx.changed() => {
+            //             result.map_err(|e| WsGatorError::WatchChannel(e.into()))?;
+            //             drop(writer_tx);
+            //             break Ok(());
+            //         }
+            //     }
+            // };
+            //
+            // // Awaiting for everyone to stop
+            // special_event_handle.await??;
+            // writer_handler.await??;
+            //
+            // result
         })
     }
 
