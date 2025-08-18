@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use std::pin::Pin;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use async_trait::async_trait;
 use futures::stream::SplitStream;
@@ -30,27 +31,30 @@ pub trait Behaviour: Send + Sync {
     async fn on_error(&self) {}
     async fn on_stop(&self) {
     }
+    
+    // This loop is to define a special logic and it is not in ordinary
+    fn special_loop(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
+        None
+    }
+
+    // Basic loop to iterate for messages and recieve stop_signal
     async fn basic_loop(&self, mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>, message_tx: MpscSender<Message>) {
         
         loop {
             match stream.next().await {
                 Some(Ok(message)) => { 
-                    match self.on_message(message) {
-                        Some(message_to_send) => {
-                            let _ = message_tx.send(message_to_send).await;
-                        },
-                        None => {
-                            // TODO
-                            // How can we handle and react 
-                        }
+                    if let Some(message_to_send) = self.on_message(message) {
+                        let _ = message_tx.send(message_to_send).await;
                     }
                 },
                 Some(Err(e)) => {
                     // TODO - log it!
+                    println!("ERROR: {e}");
                     break;
                 },
                 None => {
                     // TODO - log it?
+                    println!("None!");
                     break;
                 },
             }
@@ -69,7 +73,11 @@ pub trait Behaviour: Send + Sync {
     ) {
         self.on_connect(id, &message_tx).await;
         
-        // Here we have a basic loop
+        // Special loop executes as a different thread
+        if let Some(task) = self.special_loop() {
+            tokio::spawn(task);
+        }
+
         tokio::select! {
             _ = self.basic_loop(stream, message_tx.clone()) => {},
             _ = stop_rx.changed() => {
