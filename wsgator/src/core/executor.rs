@@ -1,6 +1,6 @@
 use super::{behaviour::Behaviour, runner::Runner};
-use crate::{configs::cmd_args::Args, get_factories};
 use crate::Arc;
+use crate::{configs::cmd_args::Args, get_factories};
 
 pub struct Executor {
     waves_number: u32,

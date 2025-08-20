@@ -1,5 +1,5 @@
-use crate::core::behaviour;
 use crate::Arc;
+use crate::core::behaviour;
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
 use futures::StreamExt;
@@ -60,23 +60,28 @@ impl ClientContext {
         // Starting writer
         // TODO: refactor! Get rid of this clone!
         // TODO: collect all handles!
-        let _writer_handle = self.behaviour.start_writer(sink, message_rx);
+        let writer = self.behaviour.get_writer(sink, message_rx);
         let special_loop = self.behaviour.clone().get_special_loop();
-        let basic_loop = self.behaviour.clone().get_basic_loop(stream, message_tx.clone());
-        // Starting blocking behaviour cycle main_thing (really blocking or spawning?)
-        
+        let basic_loop = self
+            .behaviour
+            .clone()
+            .get_basic_loop(stream, message_tx.clone());
+
         // Lets start it!
         
-        // If special loop present - starting it
-        if let Some(special_loop) = special_loop {        
-           tokio::spawn(special_loop);
+        if let Some(writer) = writer {
+            tokio::spawn(writer);
         }
-        
+
+        // If special loop present - starting it
+        if let Some(special_loop) = special_loop {
+            tokio::spawn(special_loop);
+        }
+
         tokio::select! {
             _ = basic_loop => {},
             _ = self.stop_rx.changed() => {}
         }
-        
 
         Ok(())
     }
