@@ -16,7 +16,7 @@ use core::error_log::*;
 
 type Factories = (
     Box<dyn Fn() -> Box<dyn Runner>>,
-    Box<dyn Fn() -> Box<dyn Behaviour>>,
+    Box<dyn Fn() -> Arc<dyn Behaviour>>,
 );
 
 pub fn get_factories(args: &Args) -> Factories {
@@ -53,10 +53,10 @@ pub fn get_factories(args: &Args) -> Factories {
 
     let behaviour_factory = {
         match args.behavior {
-            BehaviourType::NoChoice => || Box::new(PingPongBehaviour {}) as Box<dyn Behaviour>,
-            BehaviourType::PingPong => || Box::new(PingPongBehaviour {}) as Box<dyn Behaviour>,
-            BehaviourType::Silent => || Box::new(SilentBehaviour {}) as Box<dyn Behaviour>,
-            BehaviourType::Flood => || Box::new(FloodBehaviour {}) as Box<dyn Behaviour>,
+            BehaviourType::NoChoice => || Arc::new(PingPongBehaviour {}) as Arc<dyn Behaviour>,
+            BehaviourType::PingPong => || Arc::new(PingPongBehaviour {}) as Arc<dyn Behaviour>,
+            BehaviourType::Silent => || Arc::new(SilentBehaviour {}) as Arc<dyn Behaviour>,
+            BehaviourType::Flood => || Arc::new(FloodBehaviour {}) as Arc<dyn Behaviour>,
         }
     };
 

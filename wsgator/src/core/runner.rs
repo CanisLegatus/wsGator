@@ -25,11 +25,10 @@ pub trait Runner: Send + Sync {
     // What we do here exactly? Hmm... Client context here is not a config! It's an active actor
     fn collect_clients(
         &self,
-        behaviour: Box<dyn Behaviour>,
+        behaviour: Arc<dyn Behaviour>,
     ) -> (Vec<ClientContext>, WatchSender<bool>) {
         let common_config = self.get_common_config();
         let (stop_tx, stop_rx) = watch::channel(false);
-        let behaviour = Arc::new(behaviour);
 
         let clients: Vec<ClientContext> = (0..common_config.connection_number)
             .map(|id| {
@@ -85,7 +84,7 @@ pub trait Runner: Send + Sync {
     }
 
     // Function to create, run and collect final results from ClientContexts
-    async fn run(&self, behaviour: Box<dyn Behaviour>) {
+    async fn run(&self, behaviour: Arc<dyn Behaviour>) {
         let (clients, stop_tx) = self.collect_clients(behaviour);
         let join_handle_vec = self.run_clients(clients, stop_tx).await;
         // TODO

@@ -1,10 +1,11 @@
 use super::{behaviour::Behaviour, runner::Runner};
 use crate::{configs::cmd_args::Args, get_factories};
+use crate::Arc;
 
 pub struct Executor {
     waves_number: u32,
     runner: Box<dyn Fn() -> Box<dyn Runner>>,
-    behaviour: Box<dyn Fn() -> Box<dyn Behaviour>>,
+    behaviour: Box<dyn Fn() -> Arc<dyn Behaviour>>,
 }
 //  Executor
 //  Starts the test

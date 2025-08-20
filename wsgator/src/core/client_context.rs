@@ -21,7 +21,7 @@ pub struct ClientContext {
     id: u32,
     url: String,
     stop_rx: WatchReceiver<bool>,
-    behaviour: Arc<Box<dyn Behaviour>>,
+    behaviour: Arc<dyn Behaviour>,
     monitor: Arc<Monitor>,
 }
 
@@ -30,7 +30,7 @@ impl ClientContext {
         id: u32,
         url: String,
         stop_rx: WatchReceiver<bool>,
-        behaviour: Arc<Box<dyn Behaviour>>,
+        behaviour: Arc<dyn Behaviour>,
         monitor: Arc<Monitor>,
     ) -> Self {
         Self {
@@ -65,7 +65,7 @@ impl ClientContext {
         
         // Lets start it!
 
-        tokio::spawn(special_loop);
+       //tokio::spawn(special_loop);
 
         Ok(())
     }
