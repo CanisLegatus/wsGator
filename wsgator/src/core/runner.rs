@@ -56,7 +56,7 @@ pub trait Runner: Send + Sync {
         // Starting stop task
 
         let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
-        
+
         // TODO!
         // Timer should be a part of a behaviour somehow
         // Like it is ok to have timer in runner (probably???)

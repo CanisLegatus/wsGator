@@ -1,5 +1,8 @@
 use futures::StreamExt;
 use std::pin::Pin;
+use futures::stream::SplitSink;
+use futures::SinkExt;
+use tokio::sync::mpsc::Receiver as MpscReceiver;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use async_trait::async_trait;
 use futures::stream::SplitStream;
@@ -7,6 +10,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::Sender as MpscSender;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use crate::core::error::WsGatorError;
 
 #[async_trait]
 pub trait Behaviour: Send + Sync {
@@ -23,6 +27,24 @@ pub trait Behaviour: Send + Sync {
             }
         }
     }
+
+    // Starting
+    fn start_writer(
+        &self,
+        mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+        mut message_rx: MpscReceiver<Message>,
+    ) -> Result<(), WsGatorError> {
+        tokio::spawn(async move {
+            while let Some(message) = message_rx.recv().await {
+                sink.send(message).await?;
+            }
+
+            Ok::<(), WsGatorError>(())
+        });
+
+        Ok(())
+    }
+
     async fn on_connect(&self, id: u32, message_tx: &MpscSender<Message>) {
         let _ = message_tx
             .send(Message::Text(format!("Task {} started!", id).into()))
@@ -33,12 +55,12 @@ pub trait Behaviour: Send + Sync {
     }
     
     // This loop is to define a special logic and it is not in ordinary
-    fn special_loop(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
+    async fn get_special_loop(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
         None
     }
 
     // Basic loop to iterate for messages and recieve stop_signal
-    async fn basic_loop(&self, mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>, message_tx: MpscSender<Message>) {
+    async fn get_basic_loop(&self, mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>, message_tx: MpscSender<Message>) {
         
         loop {
             match stream.next().await {
@@ -59,32 +81,6 @@ pub trait Behaviour: Send + Sync {
                 },
             }
         }
-    }
-        
-    // TODO!
-    // We need error catching
-    async fn run(
-        &self,
-        id: u32,
-        stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-        message_tx: MpscSender<Message>,
-        mut stop_rx: WatchReceiver<bool>,
-    ) {
-        self.on_connect(id, &message_tx).await;
-        
-        // Special loop executes as a different thread
-        if let Some(task) = self.special_loop() {
-            tokio::spawn(task);
-        }
-
-        tokio::select! {
-            _ = self.basic_loop(stream, message_tx.clone()) => {},
-            _ = stop_rx.changed() => {
-                println!("Death on timer!");
-            },
-        }
-
-        self.on_stop().await;
     }
 }
 
