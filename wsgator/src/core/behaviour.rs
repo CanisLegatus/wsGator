@@ -1,9 +1,9 @@
+use crate::Arc;
 use futures::StreamExt;
 use std::pin::Pin;
 use futures::stream::SplitSink;
 use futures::SinkExt;
 use tokio::sync::mpsc::Receiver as MpscReceiver;
-use tokio::sync::watch::Receiver as WatchReceiver;
 use async_trait::async_trait;
 use futures::stream::SplitStream;
 use tokio::net::TcpStream;
@@ -55,12 +55,12 @@ pub trait Behaviour: Send + Sync {
     }
     
     // This loop is to define a special logic and it is not in ordinary
-    async fn get_special_loop(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
+    fn get_special_loop(self: Arc<Self>) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
         None
     }
 
     // Basic loop to iterate for messages and recieve stop_signal
-    async fn get_basic_loop(&self, mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>, message_tx: MpscSender<Message>) {
+    async fn get_basic_loop(self: Arc<Self>, mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>, message_tx: MpscSender<Message>) {
         
         loop {
             match stream.next().await {
