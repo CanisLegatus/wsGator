@@ -26,7 +26,7 @@ impl Executor {
 
     pub async fn run(&self) {
         // Starting wave
-        for wave in 0..self.waves_number {
+        for _wave in 0..self.waves_number {
             // Unpacking everything
             let behaviour = (*self.behaviour)();
             let runner = (*self.runner)();

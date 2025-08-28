@@ -1,7 +1,9 @@
+use crate::core::timer::TimerType;
 use futures::future::join_all;
 use std::time::Duration;
 
 use crate::Arc;
+use crate::core::timer::Timer;
 use async_trait::async_trait;
 use futures::{StreamExt, stream};
 use tokio::sync::watch;
@@ -18,17 +20,21 @@ use super::monitor::Monitor;
 // Creation and management of connection pool
 // Passing params to ClientContext
 
+struct ClientBatch {
+    clients: Vec<ClientContext>,
+    stop_tx: Option<WatchSender<bool>>,
+}
+
 #[async_trait]
 pub trait Runner: Send + Sync {
     fn get_common_config(&self) -> &CommonRunnerConfig;
 
     // What we do here exactly? Hmm... Client context here is not a config! It's an active actor
-    fn collect_clients(
-        &self,
-        behaviour: Arc<dyn Behaviour>,
-    ) -> (Vec<ClientContext>, WatchSender<bool>) {
+    fn create_clients(&self, behaviour: Arc<dyn Behaviour>) -> ClientBatch {
         let common_config = self.get_common_config();
-        let (stop_tx, stop_rx) = watch::channel(false);
+
+        let mut timer = Timer::new(TimerType::Outer);
+        let stop_tx = timer.get_outer_timer();
 
         let clients: Vec<ClientContext> = (0..common_config.connection_number)
             .map(|id| {
@@ -36,45 +42,32 @@ pub trait Runner: Send + Sync {
                 ClientContext::new(
                     id,
                     common_config.url.clone(),
-                    stop_rx.clone(),
+                    timer.clone().into(),
                     behaviour.clone(),
                     Arc::new(Monitor {}),
                 )
             })
             .collect();
 
-        (clients, stop_tx)
+        ClientBatch { clients, stop_tx }
     }
 
     // Function to manipulate start runners
     async fn run_clients(
         &self,
-        clients: Vec<ClientContext>,
-        stop_tx: WatchSender<bool>,
+        client_batch: ClientBatch,
     ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
-        // Starting stop task
-
         let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
 
-        // TODO!
-        // Timer should be a part of a behaviour somehow
-        // Like it is ok to have timer in runner (probably???)
-        // But when it comes for connections to have individual timers
-        // They can ignore global timer - but it is weird
-        // It's better to have timer somewhere inside...
-        // And probably getting it outside...
-        // But... Hmm
-        // Timer contol which is recieved by runner from context on Behaviour
-        // as a part of initial scheme with Option<OuterTimer?>
-        // But hm...
-        // On_start can create Inner timers but it's not kinda... native?
-        // Need to think about it
-        tokio::spawn(async move {
-            let _ = tokio::time::sleep(connection_duration).await;
-            let _ = stop_tx.send(false);
-        });
+        // Spawning outide timer
+        if let Some(stop_tx) = client_batch.stop_tx {
+            tokio::spawn(async move {
+                let _ = tokio::time::sleep(connection_duration).await;
+                let _ = stop_tx.send(false);
+            });
+        }
 
-        stream::iter(clients)
+        stream::iter(client_batch.clients)
             .map(|mut client| async move {
                 tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) })
             })
@@ -85,8 +78,8 @@ pub trait Runner: Send + Sync {
 
     // Function to create, run and collect final results from ClientContexts
     async fn run(&self, behaviour: Arc<dyn Behaviour>) {
-        let (clients, stop_tx) = self.collect_clients(behaviour);
-        let join_handle_vec = self.run_clients(clients, stop_tx).await;
+        let client_batch = self.create_clients(behaviour);
+        let join_handle_vec = self.run_clients(client_batch).await;
         // TODO
         // Simple yet bad position
         // Errors should be handled out of every task

@@ -1,5 +1,6 @@
 use crate::Arc;
 use crate::core::error::WsGatorError;
+use crate::core::timer::TimerType;
 use async_trait::async_trait;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -11,6 +12,8 @@ use tokio::sync::mpsc::Receiver as MpscReceiver;
 use tokio::sync::mpsc::Sender as MpscSender;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+pub type Writer = Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>;
 
 #[async_trait]
 pub trait Behaviour: Send + Sync {
@@ -24,12 +27,16 @@ pub trait Behaviour: Send + Sync {
         }
     }
 
+    fn get_timer(&self) -> TimerType {
+        TimerType::Outer
+    }
+
     // Starting
     fn get_writer(
         &self,
         mut sink: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
         mut message_rx: MpscReceiver<Message>,
-    ) -> Option<Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>> {
+    ) -> Option<Writer> {
         Some(Box::pin(async move {
             while let Some(message) = message_rx.recv().await {
                 sink.send(message).await?;

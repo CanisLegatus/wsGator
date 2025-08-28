@@ -1,11 +1,11 @@
 use crate::Arc;
-use crate::core::behaviour;
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
+use crate::core::timer::Timer;
+use crate::core::timer::TimerType;
 use futures::StreamExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
@@ -20,7 +20,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 pub struct ClientContext {
     id: u32,
     url: String,
-    stop_rx: WatchReceiver<bool>,
+    timer: Arc<Timer>,
     behaviour: Arc<dyn Behaviour>,
     monitor: Arc<Monitor>,
 }
@@ -29,14 +29,14 @@ impl ClientContext {
     pub fn new(
         id: u32,
         url: String,
-        stop_rx: WatchReceiver<bool>,
+        timer: Arc<Timer>,
         behaviour: Arc<dyn Behaviour>,
         monitor: Arc<Monitor>,
     ) -> Self {
         Self {
             id,
             url,
-            stop_rx,
+            timer,
             behaviour,
             monitor,
         }
@@ -57,8 +57,9 @@ impl ClientContext {
         // Starting message channel
         let (message_tx, message_rx) = mpsc::channel::<Message>(128);
 
+        // TODO: stoped right here on let stop_tx =
+
         // Starting writer
-        // TODO: refactor! Get rid of this clone!
         // TODO: collect all handles!
         let writer = self.behaviour.get_writer(sink, message_rx);
         let special_loop = self.behaviour.clone().get_special_loop();
@@ -68,7 +69,7 @@ impl ClientContext {
             .get_basic_loop(stream, message_tx.clone());
 
         // Lets start it!
-        
+
         if let Some(writer) = writer {
             tokio::spawn(writer);
         }
@@ -80,7 +81,7 @@ impl ClientContext {
 
         tokio::select! {
             _ = basic_loop => {},
-            _ = self.stop_rx.changed() => {}
+            _ = self.timer.reciever.changed() => {}
         }
 
         Ok(())
