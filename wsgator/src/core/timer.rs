@@ -30,6 +30,10 @@ impl Timer {
     pub fn get_outer_timer(&mut self) -> Option<WatchSender<bool>> {
         self.sender.take()
     }
+
+    pub fn get_outer_timer_reciever(&self) -> Option<WatchReceiver<bool>> {
+        self.reciever.clone()
+    }
 }
 
 #[derive(Clone)]

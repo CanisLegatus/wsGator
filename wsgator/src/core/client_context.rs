@@ -1,8 +1,7 @@
-use crate::Arc;
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
 use crate::core::timer::Timer;
-use crate::core::timer::TimerType;
+use crate::Arc;
 use futures::StreamExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -57,8 +56,6 @@ impl ClientContext {
         // Starting message channel
         let (message_tx, message_rx) = mpsc::channel::<Message>(128);
 
-        // TODO: stoped right here on let stop_tx =
-
         // Starting writer
         // TODO: collect all handles!
         let writer = self.behaviour.get_writer(sink, message_rx);
@@ -79,14 +76,27 @@ impl ClientContext {
             tokio::spawn(special_loop);
         }
 
-        tokio::select! {
-            _ = basic_loop => {},
-            _ = self.timer.reciever.changed() => {}
+        // Getting stop_tx clone for this client context
+        let stop_rx = self.timer.get_outer_timer_reciever();
+
+        match stop_rx {
+            Some(mut stop_tx) => {
+                tokio::select! {
+                    _ = basic_loop => {},
+                    _ = stop_tx.changed() => {}
+                }
+            }
+            None => {
+                basic_loop.await;
+            }
         }
+
+        // Hm, maybe some last second actions?
+        self.on_shutdown().await;
 
         Ok(())
     }
 
     pub async fn prepare_taks(&self) {}
-    pub async fn shutdown(&self) {}
+    pub async fn on_shutdown(&self) {}
 }
