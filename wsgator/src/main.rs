@@ -6,6 +6,7 @@ use core::runner::CommonRunnerConfig;
 use core::runner::LinearRunner;
 use core::runner::RampUpRunner;
 use core::runner::Runner;
+use std::env::args;
 use std::sync::Arc;
 
 mod configs;

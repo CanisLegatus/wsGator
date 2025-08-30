@@ -1,7 +1,7 @@
+use crate::Arc;
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
 use crate::core::timer::Timer;
-use crate::Arc;
 use futures::StreamExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -51,6 +51,10 @@ impl ClientContext {
     pub async fn run(&mut self) -> Result<(), WsError> {
         // Starting our websocket
         let websocket = self.get_ws_connection().await?;
+
+        // Adding on_connect
+        self.on_connect().await;
+
         let (sink, stream) = websocket.split();
 
         // Starting message channel
@@ -68,6 +72,7 @@ impl ClientContext {
         // Lets start it!
 
         if let Some(writer) = writer {
+            println!("Spawned writer");
             tokio::spawn(writer);
         }
 
@@ -97,6 +102,6 @@ impl ClientContext {
         Ok(())
     }
 
-    pub async fn prepare_taks(&self) {}
+    pub async fn on_connect(&self) {}
     pub async fn on_shutdown(&self) {}
 }

@@ -6,6 +6,7 @@ use futures::SinkExt;
 use futures::StreamExt;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
+use std::future;
 use std::pin::Pin;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::Receiver as MpscReceiver;
@@ -87,6 +88,11 @@ pub trait Behaviour: Send + Sync {
     }
 }
 
+// TODO: Whats NEXT:
+// I found out that tungstenite is not THAT low-level tool
+// It is automatically sends Pong when it recieve Ping if you parse stream
+// Need to implement other strategies and behaviours to see how it fits
+
 // Structs
 pub struct SilentBehaviour {}
 
@@ -96,7 +102,27 @@ pub struct FloodBehaviour {}
 
 // Implementations
 #[async_trait]
-impl Behaviour for SilentBehaviour {}
+impl Behaviour for SilentBehaviour {
+    fn get_writer(
+        &self,
+        _: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+        _: MpscReceiver<Message>,
+    ) -> Option<Writer> {
+        None
+    }
+
+    async fn get_basic_loop(
+        self: Arc<Self>,
+        _: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+        _: MpscSender<Message>,
+    ) {
+        future::pending::<()>().await;
+    }
+
+    fn get_timer(&self) -> TimerType {
+        TimerType::Outer
+    }
+}
 
 #[async_trait]
 impl Behaviour for PingPongBehaviour {}

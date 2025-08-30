@@ -15,7 +15,7 @@ pub enum RunnerType {
     ExpoRampUp,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
 pub enum BehaviourType {
     NoChoice,
     Silent,

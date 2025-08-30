@@ -6,8 +6,7 @@ use crate::Arc;
 use crate::core::timer::Timer;
 use async_trait::async_trait;
 use futures::{StreamExt, stream};
-use tokio::sync::watch;
-use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
+use tokio::sync::watch::Sender as WatchSender;
 use tokio::task::JoinHandle;
 
 use super::behaviour::Behaviour;
@@ -20,7 +19,7 @@ use super::monitor::Monitor;
 // Creation and management of connection pool
 // Passing params to ClientContext
 
-struct ClientBatch {
+pub struct ClientBatch {
     clients: Vec<ClientContext>,
     stop_tx: Option<WatchSender<bool>>,
 }
@@ -29,10 +28,10 @@ struct ClientBatch {
 pub trait Runner: Send + Sync {
     fn get_common_config(&self) -> &CommonRunnerConfig;
 
-    // What we do here exactly? Hmm... Client context here is not a config! It's an active actor
     fn create_clients(&self, behaviour: Arc<dyn Behaviour>) -> ClientBatch {
         let common_config = self.get_common_config();
 
+        // TODO: implement TimersConfigs!
         let mut timer = Timer::new(TimerType::Outer);
         let stop_tx = timer.get_outer_timer();
 
