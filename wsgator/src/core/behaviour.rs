@@ -20,7 +20,6 @@ pub type Writer = Pin<Box<dyn Future<Output = Result<(), WsGatorError>> + Send>>
 pub trait Behaviour: Send + Sync {
     fn on_message(&self, message: Message) -> Option<Message> {
         match message {
-            Message::Ping(bytes) => Some(Message::Pong(bytes)),
             Message::Text(text) => {
                 Some(Message::Text(format!("Server sent me text! {text}").into()))
             }
@@ -130,7 +129,6 @@ impl Behaviour for SilentBehaviour {
     ) {
         future::pending::<()>().await;
     }
-
 }
 
 #[async_trait]

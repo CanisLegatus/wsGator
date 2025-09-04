@@ -31,7 +31,6 @@ pub trait Runner: Send + Sync {
     fn create_clients(&self, behaviour: Arc<dyn Behaviour>) -> ClientBatch {
         let common_config = self.get_common_config();
 
-        // TODO: implement TimersConfigs!
         let mut timer = Timer::new(TimerType::Outer);
         let stop_tx = timer.get_outer_timer();
 
@@ -93,16 +92,28 @@ pub struct CommonRunnerConfig {
     pub url: String,
     pub connection_number: u32,
     pub connection_duration: u64,
+    pub ramp_strategy: Option<RampUpStrategy>,
 }
 
-
-
 // TODO: Working on different Runners to implement major strategies
-pub enum RampStrategy {
-    Linear { target_connection: i32, ramp_duration: i32 },
-    Stepped { step_duration: i32, step_size: i32 },
-    Expotential { growth_factor: i32 },
-    Sine { min_connections: i32, max_connections: i32, period: i32 },
+#[derive(Clone)]
+pub enum RampUpStrategy {
+    Linear {
+        target_connection: u32,
+        ramp_duration: u64,
+    },
+    Stepped {
+        step_duration: u32,
+        step_size: u32,
+    },
+    Expotential {
+        growth_factor: u32,
+    },
+    Sine {
+        min_connections: u32,
+        max_connections: u32,
+        period: u32,
+    },
 }
 
 pub struct LinearRunner {
@@ -126,25 +137,31 @@ impl Runner for RampUpRunner {
     fn get_common_config(&self) -> &CommonRunnerConfig {
         &self.common_config
     }
-}
-// Getting run logic
-//            let runner = strategy
-//              .clone()
-//            .prepare_strategy(config.clone(), log.clone())
-//           .await?;
-//
-//          println!("---> Wave ATTACK stage...");
-//
-// Running tasks and collecting them to join_set
-//          let mut join_set = runner.await?;
 
-//        // Handling errors in async tasks
-//      while let Some(result_of_async_task) = join_set.join_next().await {
-//        match result_of_async_task {
-//          Ok(Ok(())) => continue,
-//         Ok(Err(e)) => {
-//           log.count(e);
-//     }
-//   Err(join_error) => {
-//     println!("Join Error! Error: {join_error}");
-//}
+    async fn run_clients(
+        &self,
+        client_batch: ClientBatch,
+    ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
+        let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
+        let delay_millis = (self.get_common_config().connection_duration * 1000)
+            / self.get_common_config().connection_number as u64;
+
+        // Spawning outide timer
+        if let Some(stop_tx) = client_batch.stop_tx {
+            tokio::spawn(async move {
+                let _ = tokio::time::sleep(connection_duration).await;
+                let _ = stop_tx.send(false);
+            });
+        }
+
+        let mut result_vec = vec![];
+
+        for mut client in client_batch.clients {
+            let x = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+            tokio::time::sleep(Duration::from_millis(delay_millis)).await;
+            result_vec.push(x);
+        }
+
+        result_vec
+    }
+}
