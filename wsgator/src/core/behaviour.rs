@@ -88,19 +88,31 @@ pub trait Behaviour: Send + Sync {
     }
 }
 
-// TODO: Whats NEXT:
-// I found out that tungstenite is not THAT low-level tool
-// It is automatically sends Pong when it recieve Ping if you parse stream
-// Need to implement other strategies and behaviours to see how it fits
+// TODO:
+// Bad Client / Fuzzer - bad data / random json, binary trash
+// Lazy Reader / Slow Consumer    / Slow response
+// Stateful Scenario              / State scenario - auth/...
+// Reconnect Storm
 
-// Structs
+// Completely basic behaviour with all defaults
+pub struct DefaultBehaviour {}
+
+/// Structs
+/// SilentBehaviour is not responding to anything
 pub struct SilentBehaviour {}
 
+/// PingPongBehaviour is anwsering on basic pings and send pings
+/// TODO: Unimplemented
 pub struct PingPongBehaviour {}
 
+/// FloodBehaviour is sending flood messages to server constantly
+/// TODO: Unimplemented
 pub struct FloodBehaviour {}
 
 // Implementations
+#[async_trait]
+impl Behaviour for DefaultBehaviour {}
+
 #[async_trait]
 impl Behaviour for SilentBehaviour {
     fn get_writer(
@@ -119,9 +131,6 @@ impl Behaviour for SilentBehaviour {
         future::pending::<()>().await;
     }
 
-    fn get_timer(&self) -> TimerType {
-        TimerType::Outer
-    }
 }
 
 #[async_trait]

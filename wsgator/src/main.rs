@@ -54,7 +54,7 @@ pub fn get_factories(args: &Args) -> Factories {
 
     let behaviour_factory = {
         match args.behavior {
-            BehaviourType::NoChoice => || Arc::new(PingPongBehaviour {}) as Arc<dyn Behaviour>,
+            BehaviourType::NoChoice => || Arc::new(DefaultBehaviour {}) as Arc<dyn Behaviour>,
             BehaviourType::PingPong => || Arc::new(PingPongBehaviour {}) as Arc<dyn Behaviour>,
             BehaviourType::Silent => || Arc::new(SilentBehaviour {}) as Arc<dyn Behaviour>,
             BehaviourType::Flood => || Arc::new(FloodBehaviour {}) as Arc<dyn Behaviour>,

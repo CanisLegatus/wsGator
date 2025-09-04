@@ -95,6 +95,16 @@ pub struct CommonRunnerConfig {
     pub connection_duration: u64,
 }
 
+
+
+// TODO: Working on different Runners to implement major strategies
+pub enum RampStrategy {
+    Linear { target_connection: i32, ramp_duration: i32 },
+    Stepped { step_duration: i32, step_size: i32 },
+    Expotential { growth_factor: i32 },
+    Sine { min_connections: i32, max_connections: i32, period: i32 },
+}
+
 pub struct LinearRunner {
     pub common_config: CommonRunnerConfig,
 }
@@ -104,7 +114,6 @@ pub struct RampUpRunner {
 }
 
 // Implementations
-
 #[async_trait]
 impl Runner for LinearRunner {
     fn get_common_config(&self) -> &CommonRunnerConfig {
