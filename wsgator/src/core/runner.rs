@@ -1,4 +1,5 @@
 use crate::core::timer::TimerType;
+use std::pin::Pin;
 use futures::future::join_all;
 use std::time::Duration;
 
@@ -124,6 +125,10 @@ pub struct RampUpRunner {
     pub common_config: CommonRunnerConfig,
 }
 
+impl RampUpRunner{
+    pub fn test(&self){}
+}
+
 // Implementations
 #[async_trait]
 impl Runner for LinearRunner {
@@ -142,6 +147,18 @@ impl Runner for RampUpRunner {
         &self,
         client_batch: ClientBatch,
     ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
+        
+        let strategy = self.get_common_config().ramp_strategy.clone().unwrap();
+
+        let run: Pin<Box<dyn Future<Output = ()> + Send>> = match strategy {
+            RampUpStrategy::Linear { target_connection, ramp_duration } => {Box::pin(async move {})},
+            RampUpStrategy::Stepped { step_duration, step_size } => {Box::pin(async move {})},
+            RampUpStrategy::Expotential { growth_factor } => {Box::pin(async move {})},
+            RampUpStrategy::Sine { min_connections, max_connections, period } => {Box::pin(async move {})},
+        };
+
+        run.await;
+
         let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
         let delay_millis = (self.get_common_config().connection_duration * 1000)
             / self.get_common_config().connection_number as u64;
