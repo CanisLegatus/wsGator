@@ -96,7 +96,9 @@ pub struct CommonRunnerConfig {
     pub ramp_strategy: Option<RampUpStrategy>,
 }
 
-// TODO: Working on different Runners to implement major strategies
+type RampUpRunnerFuture =
+    Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>>;
+
 #[derive(Clone)]
 pub enum RampUpStrategy {
     Linear {
@@ -118,11 +120,7 @@ pub enum RampUpStrategy {
 }
 
 impl RampUpStrategy {
-    fn run(
-        self,
-        config: CommonRunnerConfig,
-        client_batch: ClientBatch,
-    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
+    fn run(self, config: CommonRunnerConfig, client_batch: ClientBatch) -> RampUpRunnerFuture {
         match self {
             RampUpStrategy::Linear {
                 target_connection,
@@ -131,7 +129,7 @@ impl RampUpStrategy {
             RampUpStrategy::Stepped {
                 step_duration,
                 step_size,
-            } => self.get_stepped(),
+            } => self.get_stepped(config, client_batch, step_duration, step_size),
             RampUpStrategy::Expotential { growth_factor } => self.get_expotential(),
             RampUpStrategy::Sine {
                 min_connections,
@@ -144,7 +142,7 @@ impl RampUpStrategy {
         self,
         config: CommonRunnerConfig,
         client_batch: ClientBatch,
-    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
+    ) -> RampUpRunnerFuture {
         Box::pin(async move {
             let connection_duration = Duration::from_secs(config.connection_duration);
             let delay_millis =
@@ -172,25 +170,31 @@ impl RampUpStrategy {
 
     fn get_stepped(
         self,
-    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
+        config: CommonRunnerConfig,
+        client_batch: ClientBatch,
+        step_duration: u32,
+        step_size: u32,
+    ) -> RampUpRunnerFuture {
+        Box::pin(async move {
+            let connection_duration = Duration::from_secs(config.connection_duration);
+            let step_duration = Duration::from_millis(step_duration as u64);
+
+            // TODO: next_todo - write down logic to make stepped connections
+
+            // TODO: default
+            let result_vec = vec![];
+            result_vec
+        })
+    }
+
+    fn get_expotential(self) -> RampUpRunnerFuture {
         Box::pin(async move {
             let result_vec = vec![];
             result_vec
         })
     }
 
-    fn get_expotential(
-        self,
-    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
-        Box::pin(async move {
-            let result_vec = vec![];
-            result_vec
-        })
-    }
-
-    fn get_sine(
-        self,
-    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
+    fn get_sine(self) -> RampUpRunnerFuture {
         Box::pin(async move {
             let result_vec = vec![];
             result_vec
