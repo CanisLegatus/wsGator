@@ -117,6 +117,39 @@ pub enum RampUpStrategy {
     },
 }
 
+impl RampUpStrategy {
+    fn run(self) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        match self {
+            RampUpStrategy::Linear { target_connection, ramp_duration } => {self.get_linear()},
+            RampUpStrategy::Stepped { step_duration, step_size } => {self.get_stepped()},
+            RampUpStrategy::Expotential { growth_factor } => {self.get_expotential()},
+            RampUpStrategy::Sine { min_connections, max_connections, period } => {self.get_sine()},
+        }
+    }
+    fn get_linear(self) -> Pin<Box<dyn Future<Output = ()> + Send>>{
+        Box::pin(
+            async move {}
+        )
+    }
+    
+    fn get_stepped(self) -> Pin<Box<dyn Future<Output = ()> + Send>>{
+        Box::pin(
+            async move {}
+        )
+    }
+
+    fn get_expotential(self) -> Pin<Box<dyn Future<Output = ()> + Send>>{
+        Box::pin(
+            async move {}
+        )}
+
+    fn get_sine(self) -> Pin<Box<dyn Future<Output = ()> + Send>>{
+        Box::pin(
+            async move {}
+        )
+    }
+}
+
 pub struct LinearRunner {
     pub common_config: CommonRunnerConfig,
 }
@@ -126,7 +159,7 @@ pub struct RampUpRunner {
 }
 
 impl RampUpRunner{
-    pub fn test(&self){}
+
 }
 
 // Implementations
@@ -150,14 +183,7 @@ impl Runner for RampUpRunner {
         
         let strategy = self.get_common_config().ramp_strategy.clone().unwrap();
 
-        let run: Pin<Box<dyn Future<Output = ()> + Send>> = match strategy {
-            RampUpStrategy::Linear { target_connection, ramp_duration } => {Box::pin(async move {})},
-            RampUpStrategy::Stepped { step_duration, step_size } => {Box::pin(async move {})},
-            RampUpStrategy::Expotential { growth_factor } => {Box::pin(async move {})},
-            RampUpStrategy::Sine { min_connections, max_connections, period } => {Box::pin(async move {})},
-        };
-
-        run.await;
+        let strategy = strategy.run();
 
         let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
         let delay_millis = (self.get_common_config().connection_duration * 1000)
