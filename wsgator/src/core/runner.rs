@@ -1,6 +1,6 @@
 use crate::core::timer::TimerType;
-use std::pin::Pin;
 use futures::future::join_all;
+use std::pin::Pin;
 use std::time::Duration;
 
 use crate::Arc;
@@ -118,35 +118,83 @@ pub enum RampUpStrategy {
 }
 
 impl RampUpStrategy {
-    fn run(self) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn run(
+        self,
+        config: CommonRunnerConfig,
+        client_batch: ClientBatch,
+    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
         match self {
-            RampUpStrategy::Linear { target_connection, ramp_duration } => {self.get_linear()},
-            RampUpStrategy::Stepped { step_duration, step_size } => {self.get_stepped()},
-            RampUpStrategy::Expotential { growth_factor } => {self.get_expotential()},
-            RampUpStrategy::Sine { min_connections, max_connections, period } => {self.get_sine()},
+            RampUpStrategy::Linear {
+                target_connection,
+                ramp_duration,
+            } => self.get_linear(config, client_batch),
+            RampUpStrategy::Stepped {
+                step_duration,
+                step_size,
+            } => self.get_stepped(),
+            RampUpStrategy::Expotential { growth_factor } => self.get_expotential(),
+            RampUpStrategy::Sine {
+                min_connections,
+                max_connections,
+                period,
+            } => self.get_sine(),
         }
     }
-    fn get_linear(self) -> Pin<Box<dyn Future<Output = ()> + Send>>{
-        Box::pin(
-            async move {}
-        )
-    }
-    
-    fn get_stepped(self) -> Pin<Box<dyn Future<Output = ()> + Send>>{
-        Box::pin(
-            async move {}
-        )
+    fn get_linear(
+        self,
+        config: CommonRunnerConfig,
+        client_batch: ClientBatch,
+    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
+        Box::pin(async move {
+            let connection_duration = Duration::from_secs(config.connection_duration);
+            let delay_millis =
+                (config.connection_duration * 1000) / config.connection_number as u64;
+
+            // Spawning outide timer
+            if let Some(stop_tx) = client_batch.stop_tx {
+                tokio::spawn(async move {
+                    let _ = tokio::time::sleep(connection_duration).await;
+                    let _ = stop_tx.send(false);
+                });
+            }
+
+            let mut result_vec = vec![];
+
+            for mut client in client_batch.clients {
+                let x = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                tokio::time::sleep(Duration::from_millis(delay_millis)).await;
+                result_vec.push(x);
+            }
+
+            result_vec
+        })
     }
 
-    fn get_expotential(self) -> Pin<Box<dyn Future<Output = ()> + Send>>{
-        Box::pin(
-            async move {}
-        )}
+    fn get_stepped(
+        self,
+    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
+        Box::pin(async move {
+            let result_vec = vec![];
+            result_vec
+        })
+    }
 
-    fn get_sine(self) -> Pin<Box<dyn Future<Output = ()> + Send>>{
-        Box::pin(
-            async move {}
-        )
+    fn get_expotential(
+        self,
+    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
+        Box::pin(async move {
+            let result_vec = vec![];
+            result_vec
+        })
+    }
+
+    fn get_sine(
+        self,
+    ) -> Pin<Box<dyn Future<Output = Vec<JoinHandle<Result<(), WsGatorError>>>> + Send>> {
+        Box::pin(async move {
+            let result_vec = vec![];
+            result_vec
+        })
     }
 }
 
@@ -158,9 +206,7 @@ pub struct RampUpRunner {
     pub common_config: CommonRunnerConfig,
 }
 
-impl RampUpRunner{
-
-}
+impl RampUpRunner {}
 
 // Implementations
 #[async_trait]
@@ -180,31 +226,9 @@ impl Runner for RampUpRunner {
         &self,
         client_batch: ClientBatch,
     ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
-        
         let strategy = self.get_common_config().ramp_strategy.clone().unwrap();
-
-        let strategy = strategy.run();
-
-        let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
-        let delay_millis = (self.get_common_config().connection_duration * 1000)
-            / self.get_common_config().connection_number as u64;
-
-        // Spawning outide timer
-        if let Some(stop_tx) = client_batch.stop_tx {
-            tokio::spawn(async move {
-                let _ = tokio::time::sleep(connection_duration).await;
-                let _ = stop_tx.send(false);
-            });
-        }
-
-        let mut result_vec = vec![];
-
-        for mut client in client_batch.clients {
-            let x = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
-            tokio::time::sleep(Duration::from_millis(delay_millis)).await;
-            result_vec.push(x);
-        }
-
-        result_vec
+        strategy
+            .run(self.get_common_config().clone(), client_batch)
+            .await
     }
 }
