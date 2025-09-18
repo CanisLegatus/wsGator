@@ -1,5 +1,6 @@
 use crate::core::timer::TimerType;
 use futures::future::join_all;
+use tokio_tungstenite::tungstenite::client;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -179,9 +180,12 @@ impl RampUpStrategy {
             let connection_duration = Duration::from_secs(config.connection_duration);
             let step_duration = Duration::from_millis(step_duration as u64);
 
+            for client in client_batch.clients {
+                //Simple context
+            }
             // TODO: next_todo - write down logic to make stepped connections
+            // TODO: absolute_next - pls jump here and apply changes
 
-            // TODO: default
             let result_vec = vec![];
             result_vec
         })
