@@ -6,15 +6,6 @@ pub enum AttackStrategyType {
     Flood,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy)]
-pub enum RunnerType {
-    NoChoice,
-    Flat,
-    LinearRampUp,
-    StepsRampUp,
-    ExpoRampUp,
-}
-
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 pub enum BehaviourType {
     NoChoice,

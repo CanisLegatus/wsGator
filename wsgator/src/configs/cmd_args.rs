@@ -1,15 +1,12 @@
-use crate::configs::config_types::*;
-use clap::Parser;
+use crate::{configs::config_types::*, core::runner::RampUpStrategy};
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Clone)]
 pub struct Args {
     #[clap(short, long, default_value = "ws://localhost:9001")]
     pub url: String,
 
-    #[clap(short, long, value_enum, default_value_t = AttackStrategyType::NoChoice)]
-    pub strategy: AttackStrategyType,
-
-    #[clap(short, long, value_enum, default_value_t = RunnerType::NoChoice)]
+    #[command(subcommand)]
     pub runner: RunnerType,
 
     #[clap(short, long, value_enum, default_value_t = BehaviourType::NoChoice)]
@@ -35,4 +32,76 @@ pub struct Args {
     // Spam amount
     #[arg(long, default_value = "100", value_parser = clap::value_parser!(u64).range(1..))]
     pub spam_pause: u64,
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum RunnerType {
+    /// No runner strategy
+    NoChoice,
+
+    /// Flat runner (no ramp-up)
+    Flat,
+
+    /// Ramp-up strategy (nested enum)
+    RampUp {
+        /// Ramp-up strategy type
+        #[command(subcommand)]
+        strategy: RampUpStrategyArgs,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum RampUpStrategyArgs {
+    /// Linear ramp-up strategy
+    Linear {
+        /// Target number of connections
+        #[arg(long, default_value = "100", value_parser = clap::value_parser!(u32).range(1..))]
+        target_connection: u32,
+
+        /// Ramp-up duration in seconds
+        #[arg(long, default_value = "60", value_parser = clap::value_parser!(u64).range(1..))]
+        ramp_duration: u64,
+    },
+
+    /// Stepped ramp-up strategy
+    Steps {
+        /// Duration of each step in milliseconds
+        #[arg(long, default_value = "1000", value_parser = clap::value_parser!(u32).range(1..))]
+        step_duration: u32,
+
+        /// Number of connections per step
+        #[arg(long, default_value = "10", value_parser = clap::value_parser!(u32).range(1..))]
+        step_size: u32,
+    },
+
+    /// Exponential ramp-up strategy
+    Expo {
+        /// Growth factor
+        #[arg(long, default_value = "2", value_parser = clap::value_parser!(u32).range(1..))]
+        growth_factor: u32,
+    },
+}
+
+impl Into<RampUpStrategy> for RampUpStrategyArgs {
+    fn into(self) -> RampUpStrategy {
+        match self {
+            RampUpStrategyArgs::Linear {
+                target_connection,
+                ramp_duration,
+            } => RampUpStrategy::Linear {
+                target_connection,
+                ramp_duration,
+            },
+            RampUpStrategyArgs::Steps {
+                step_duration,
+                step_size,
+            } => RampUpStrategy::Stepped {
+                step_duration,
+                step_size,
+            },
+            RampUpStrategyArgs::Expo { growth_factor } => {
+                RampUpStrategy::Expotential { growth_factor }
+            }
+        }
+    }
 }

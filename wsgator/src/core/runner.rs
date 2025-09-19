@@ -1,8 +1,8 @@
 use crate::core::timer::TimerType;
 use futures::future::join_all;
-use tokio_tungstenite::tungstenite::client;
 use std::pin::Pin;
 use std::time::Duration;
+use tokio_tungstenite::tungstenite::client;
 
 use crate::Arc;
 use crate::core::timer::Timer;
@@ -94,7 +94,6 @@ pub struct CommonRunnerConfig {
     pub url: String,
     pub connection_number: u32,
     pub connection_duration: u64,
-    pub ramp_strategy: Option<RampUpStrategy>,
 }
 
 type RampUpRunnerFuture =
@@ -126,7 +125,7 @@ impl RampUpStrategy {
             RampUpStrategy::Linear {
                 target_connection,
                 ramp_duration,
-            } => self.get_linear(config, client_batch),
+            } => self.get_linear(config, client_batch, target_connection, ramp_duration),
             RampUpStrategy::Stepped {
                 step_duration,
                 step_size,
@@ -143,6 +142,8 @@ impl RampUpStrategy {
         self,
         config: CommonRunnerConfig,
         client_batch: ClientBatch,
+        target_connection: u32,
+        ramp_duration: u64,
     ) -> RampUpRunnerFuture {
         Box::pin(async move {
             let connection_duration = Duration::from_secs(config.connection_duration);
@@ -160,7 +161,8 @@ impl RampUpStrategy {
             let mut result_vec = vec![];
 
             for mut client in client_batch.clients {
-                let handle = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                let handle =
+                    tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
                 tokio::time::sleep(Duration::from_millis(delay_millis)).await;
                 result_vec.push(handle);
             }
@@ -180,8 +182,6 @@ impl RampUpStrategy {
             let connection_duration = Duration::from_secs(config.connection_duration);
             let step_duration = Duration::from_millis(step_duration as u64);
 
-            // TODO: Current! Working on
-
             // Spawning outide timer
             if let Some(stop_tx) = client_batch.stop_tx {
                 tokio::spawn(async move {
@@ -196,15 +196,16 @@ impl RampUpStrategy {
             for mut client in client_batch.clients {
                 counter += 1;
                 if counter <= step_size {
-                    let handle = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                    let handle =
+                        tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
                     result_vec.push(handle);
                 } else {
                     tokio::time::sleep(step_duration).await;
                     counter = 1;
-                    let handle = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                    let handle =
+                        tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
                     result_vec.push(handle);
                 }
-
             }
 
             result_vec
@@ -231,6 +232,7 @@ pub struct LinearRunner {
 }
 
 pub struct RampUpRunner {
+    pub strategy: RampUpStrategy,
     pub common_config: CommonRunnerConfig,
 }
 
@@ -254,7 +256,7 @@ impl Runner for RampUpRunner {
         &self,
         client_batch: ClientBatch,
     ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
-        let strategy = self.get_common_config().ramp_strategy.clone().unwrap();
+        let strategy = self.strategy.clone();
         strategy
             .run(self.get_common_config().clone(), client_batch)
             .await
