@@ -26,10 +26,8 @@ pub fn get_factories(args: &Args) -> Factories {
         url: args.url.clone(),
         connection_number: args.connection_number,
         connection_duration: args.connection_duration,
-        ramp_strategy: Some(core::runner::RampUpStrategy::Linear {
-            target_connection: args.connection_number,
-            ramp_duration: args.connection_duration,
-        }),
+        ramp_strategy: Some(core::runner::RampUpStrategy::Stepped { step_duration: 2000, step_size: 20 }
+        ),
     };
 
     let runner_factory: Box<dyn Fn() -> Box<dyn Runner>> = {

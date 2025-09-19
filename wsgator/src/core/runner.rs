@@ -160,9 +160,9 @@ impl RampUpStrategy {
             let mut result_vec = vec![];
 
             for mut client in client_batch.clients {
-                let x = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                let handle = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
                 tokio::time::sleep(Duration::from_millis(delay_millis)).await;
-                result_vec.push(x);
+                result_vec.push(handle);
             }
 
             result_vec
@@ -180,13 +180,33 @@ impl RampUpStrategy {
             let connection_duration = Duration::from_secs(config.connection_duration);
             let step_duration = Duration::from_millis(step_duration as u64);
 
-            for client in client_batch.clients {
-                //Simple context
-            }
-            // TODO: next_todo - write down logic to make stepped connections
-            // TODO: absolute_next - pls jump here and apply changes
+            // TODO: Current! Working on
 
-            let result_vec = vec![];
+            // Spawning outide timer
+            if let Some(stop_tx) = client_batch.stop_tx {
+                tokio::spawn(async move {
+                    let _ = tokio::time::sleep(connection_duration).await;
+                    let _ = stop_tx.send(false);
+                });
+            }
+
+            let mut counter = 0;
+            let mut result_vec = vec![];
+
+            for mut client in client_batch.clients {
+                counter += 1;
+                if counter <= step_size {
+                    let handle = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                    result_vec.push(handle);
+                } else {
+                    tokio::time::sleep(step_duration).await;
+                    counter = 1;
+                    let handle = tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                    result_vec.push(handle);
+                }
+
+            }
+
             result_vec
         })
     }
