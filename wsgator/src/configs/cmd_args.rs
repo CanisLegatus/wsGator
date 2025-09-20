@@ -79,6 +79,8 @@ pub enum RampUpStrategyArgs {
         /// Growth factor
         #[arg(long, default_value = "2", value_parser = clap::value_parser!(u32).range(1..))]
         growth_factor: u32,
+        #[arg(long, default_value = "2000", value_parser = clap::value_parser!(u64).range(1..))]
+        soaking_time: u64,
     },
 }
 
@@ -99,9 +101,13 @@ impl Into<RampUpStrategy> for RampUpStrategyArgs {
                 step_duration,
                 step_size,
             },
-            RampUpStrategyArgs::Expo { growth_factor } => {
-                RampUpStrategy::Expotential { growth_factor }
-            }
+            RampUpStrategyArgs::Expo {
+                growth_factor,
+                soaking_time,
+            } => RampUpStrategy::Expotential {
+                growth_factor,
+                soaking_time,
+            },
         }
     }
 }

@@ -72,7 +72,6 @@ impl ClientContext {
         // Lets start it!
 
         if let Some(writer) = writer {
-            println!("Spawned writer");
             tokio::spawn(writer);
         }
 

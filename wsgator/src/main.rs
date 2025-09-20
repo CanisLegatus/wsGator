@@ -20,7 +20,6 @@ type Factories = (
 );
 
 pub fn get_factories(args: &Args) -> Factories {
-    // TODO: ramp_strategy filled with filler! New to set it up dynamically
     let common_runner_config = CommonRunnerConfig {
         url: args.url.clone(),
         connection_number: args.connection_number,

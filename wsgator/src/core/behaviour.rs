@@ -73,12 +73,12 @@ pub trait Behaviour: Send + Sync {
                     }
                 }
                 Some(Err(e)) => {
-                    // TODO - log it!
+                    // TODO: Implement error handling with atomics
                     println!("ERROR: {e}");
                     break;
                 }
                 None => {
-                    // TODO - log it?
+                    // TODO: Implement error handling with atomics
                     println!("None!");
                     break;
                 }
@@ -87,7 +87,7 @@ pub trait Behaviour: Send + Sync {
     }
 }
 
-// TODO:
+// TODO: Implement bahaviours section
 // Bad Client / Fuzzer - bad data / random json, binary trash
 // Lazy Reader / Slow Consumer    / Slow response
 // Stateful Scenario              / State scenario - auth/...
@@ -101,11 +101,11 @@ pub struct DefaultBehaviour {}
 pub struct SilentBehaviour {}
 
 /// PingPongBehaviour is anwsering on basic pings and send pings
-/// TODO: Unimplemented
+/// TODO: Implement PingPongBehaviour
 pub struct PingPongBehaviour {}
 
 /// FloodBehaviour is sending flood messages to server constantly
-/// TODO: Unimplemented
+/// TODO: Implement FloodBehaviour
 pub struct FloodBehaviour {}
 
 // Implementations
