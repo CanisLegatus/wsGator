@@ -84,6 +84,7 @@ async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: A
                                 //    .send(Message::Text(format!("Server response: {}", txt).into()))
                                 //    .await { break; }
                             }
+
                             Ok(Message::Ping(data)) => {
                                 println!("Ping recieved!");
                                 if let Err(_e) = msg_tx

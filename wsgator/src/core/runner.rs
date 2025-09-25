@@ -297,7 +297,6 @@ pub struct SineRunner {
 }
 
 impl SineRunner {}
-
 impl RampUpRunner {}
 
 // Implementations
@@ -337,8 +336,41 @@ impl Runner for SineRunner {
         client_batch: ClientBatch,
     ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
 
+        let config = self.get_common_config();
+
+        let timer_handle = tokio::spawn(async {tokio::time::sleep(Duration::from_secs(10))});
+
+        // Vector with current active connections
+        let mut active_connections = vec![];
+
+        // Starting initial connections
+        for mut client in client_batch.clients {
+            active_connections.push(tokio::spawn(async move { client.run().await }));
+        }
 
 
+        while !timer_handle.is_finished() {
+            // self.min_connections
+            // self.max_connections
+            // self.period in milliseconds
+
+            let conn_diff = self.max_connections - self.min_connections;
+            let wait_time = self.period / conn_diff;
+
+        }
+
+
+
+        // while timer is not ended {
+        // do shit
+
+        // Initial connections (up to minimal)
+
+        // Creating it to max
+
+        // Decreasing it to min
+
+        // Doing same... (loop)
         vec![]
     }
 }
