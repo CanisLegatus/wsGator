@@ -59,7 +59,7 @@ pub trait Runner: Send + Sync {
     ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
         let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
 
-        // Spawning outide timer
+        // Spawning outside timer
         if let Some(stop_tx) = client_batch.stop_tx {
             tokio::spawn(async move {
                 let _ = tokio::time::sleep(connection_duration).await;
@@ -213,7 +213,6 @@ impl RampUpStrategy {
         })
     }
 
-    // TODO: Implement RampUpRunner Expotential
     fn get_expotential(
         self,
         config: CommonRunnerConfig,
@@ -290,6 +289,15 @@ pub struct RampUpRunner {
     pub common_config: CommonRunnerConfig,
 }
 
+pub struct SineRunner {
+    pub common_config: CommonRunnerConfig,
+    min_connections: u32,
+    max_connections: u32,
+    period: u32,
+}
+
+impl SineRunner {}
+
 impl RampUpRunner {}
 
 // Implementations
@@ -314,5 +322,23 @@ impl Runner for RampUpRunner {
         strategy
             .run(self.get_common_config().clone(), client_batch)
             .await
+    }
+}
+
+#[async_trait]
+impl Runner for SineRunner {
+    fn get_common_config(&self) -> &CommonRunnerConfig {
+        &self.common_config
+    }
+
+    // TODO: Sine runner logic
+    async fn run_clients(
+        &self,
+        client_batch: ClientBatch,
+    ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
+
+
+
+        vec![]
     }
 }

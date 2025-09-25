@@ -70,7 +70,6 @@ impl ClientContext {
             .get_basic_loop(stream, message_tx.clone());
 
         // Lets start it!
-
         if let Some(writer) = writer {
             tokio::spawn(writer);
         }

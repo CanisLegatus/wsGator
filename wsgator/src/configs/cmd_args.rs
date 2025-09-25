@@ -48,6 +48,9 @@ pub enum RunnerType {
         #[command(subcommand)]
         strategy: RampUpStrategyArgs,
     },
+
+    /// Sine strategy
+    Sine,
 }
 
 #[derive(Subcommand, Clone, Debug)]

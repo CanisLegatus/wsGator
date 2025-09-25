@@ -47,6 +47,11 @@ pub fn get_factories(args: &Args) -> Factories {
                         common_config: common_runner_config.clone(),
                     })
                 })
+            },
+            RunnerType::Sine => {
+                Box::new(move || {
+                    Box::new(SineRunner)
+                })
             }
         }
     };
