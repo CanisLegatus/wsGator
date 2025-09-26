@@ -16,14 +16,56 @@ use super::client_context::ClientContext;
 use super::error::WsGatorError;
 use super::monitor::Monitor;
 
+
 // Runner
 // Algorithm of a load
 // Creation and management of connection pool
 // Passing params to ClientContext
 
 pub struct ClientBatch {
+    amount: u32,
+    url: String,
+    timer: Timer,
+    behaviour: Arc<dyn Behaviour>,
     clients: Vec<ClientContext>,
     stop_tx: Option<WatchSender<bool>>,
+}
+
+impl ClientBatch {
+    pub fn generate_from_list(
+        amount: u32,
+        url: String,
+        timer: Timer,
+        behaviour: Arc<dyn Behaviour>,
+        stop_tx: Option<WatchSender<bool>>)
+    -> Self {
+        // TODO: Timertype should be considered
+        let clients: Vec<ClientContext> = (0..amount)
+            .map(|id| {
+                // Creating a client context here
+                ClientContext::new(
+                    id,
+                    url.clone(),
+                    timer.clone().into(),
+                    behaviour.clone(),
+                    Arc::new(Monitor {}),
+                )
+            })
+            .collect();
+
+        ClientBatch { amount, url, timer, behaviour, clients, stop_tx, }
+    }
+
+    // If we need to generate one
+    pub fn generate_one(&self, id: u32) -> ClientContext {
+        ClientContext::new(
+            id,
+            self.url.clone(),
+            self.timer.clone().into(),
+            self.behaviour.clone(),
+            Arc::new(Monitor {}),
+        )
+    }
 }
 
 #[async_trait]
@@ -33,23 +75,18 @@ pub trait Runner: Send + Sync {
     fn create_clients(&self, behaviour: Arc<dyn Behaviour>) -> ClientBatch {
         let common_config = self.get_common_config();
 
+        // TODO: Timertype should be conusidered
         let mut timer = Timer::new(TimerType::Outer);
         let stop_tx = timer.get_outer_timer();
 
-        let clients: Vec<ClientContext> = (0..common_config.connection_number)
-            .map(|id| {
-                // Creating a client context here
-                ClientContext::new(
-                    id,
-                    common_config.url.clone(),
-                    timer.clone().into(),
-                    behaviour.clone(),
-                    Arc::new(Monitor {}),
-                )
-            })
-            .collect();
+        // TODO: Too heavy! Refactor
+        ClientBatch::generate_from_list
+            (common_config.connection_number,
+             common_config.url.clone(),
+             timer,
+             behaviour,
+             stop_tx,)
 
-        ClientBatch { clients, stop_tx }
     }
 
     // Function to manipulate start runners
@@ -212,7 +249,7 @@ impl RampUpStrategy {
             result_vec
         })
     }
-
+//
     fn get_expotential(
         self,
         config: CommonRunnerConfig,
@@ -348,14 +385,29 @@ impl Runner for SineRunner {
             active_connections.push(tokio::spawn(async move { client.run().await }));
         }
 
-
         while !timer_handle.is_finished() {
             // self.min_connections
             // self.max_connections
+            // self.plato_time
             // self.period in milliseconds
 
             let conn_diff = self.max_connections - self.min_connections;
-            let wait_time = self.period / conn_diff;
+            let pause_time = self.period / conn_diff;
+            let pause_duration = Duration::from_millis(pause_time as u64);
+
+            loop {
+                // We need to find way to generate clients right here
+                // We need to find way to kill client contexts...
+                // And then reconnect them
+                // This could be achieved by generating it
+                // TODO: Active task (remove as you work)
+                while active_connections.len() < self.max_connections as usize {
+                    //active_connections.push(tokio::spawn(async move { client.run().await }));
+                    //let new_connection = client_batch.generate_one(0);
+                    tokio::time::sleep(pause_duration);
+                }
+            }
+
 
         }
 
