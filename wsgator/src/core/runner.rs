@@ -401,6 +401,7 @@ impl Runner for SineRunner {
                 // And then reconnect them
                 // This could be achieved by generating it
                 // TODO: Active task (remove as you work)
+                // This is upward loop
                 while active_connections.len() < self.max_connections as usize {
                     //active_connections.push(tokio::spawn(async move { client.run().await }));
                     //let new_connection = client_batch.generate_one(0);
@@ -411,18 +412,6 @@ impl Runner for SineRunner {
 
         }
 
-
-
-        // while timer is not ended {
-        // do shit
-
-        // Initial connections (up to minimal)
-
-        // Creating it to max
-
-        // Decreasing it to min
-
-        // Doing same... (loop)
-        vec![]
+       vec![]
     }
 }
