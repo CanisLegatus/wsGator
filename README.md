@@ -1,6 +1,3 @@
-Вот обновленная версия с крутыми иконками и профессиональными бейджами:
-
-```markdown
 # 🐊 wsGator - Enterprise-Grade WebSocket Load Testing Framework
 
 <div align="center">
