@@ -1,13 +1,13 @@
 use futures::SinkExt;
 use futures::StreamExt;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

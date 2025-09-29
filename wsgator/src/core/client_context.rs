@@ -1,7 +1,8 @@
 use crate::Arc;
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
-use crate::core::timer::Timer;
+use crate::core::timer::Signal;
+use crate::core::timer::SignalType;
 use futures::StreamExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -19,7 +20,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 pub struct ClientContext {
     id: u32,
     url: String,
-    timer: Arc<Timer>,
+    timer: Arc<Signal>,
     behaviour: Arc<dyn Behaviour>,
     monitor: Arc<Monitor>,
 }
@@ -28,7 +29,7 @@ impl ClientContext {
     pub fn new(
         id: u32,
         url: String,
-        timer: Arc<Timer>,
+        timer: Arc<Signal>,
         behaviour: Arc<dyn Behaviour>,
         monitor: Arc<Monitor>,
     ) -> Self {
@@ -82,11 +83,25 @@ impl ClientContext {
         // Getting stop_tx clone for this client context
         let stop_rx = self.timer.get_outer_timer_reciever();
 
+        // TODO: MAJOR! I need to reinvent how client context works to do not let loops
+
         match stop_rx {
             Some(mut stop_tx) => {
                 tokio::select! {
                     _ = basic_loop => {},
-                    _ = stop_tx.changed() => {}
+                    _ = stop_tx.changed() => {
+
+                        let signal = stop_tx.borrow().clone();
+                        match signal {
+                            SignalType::Work => {},
+                            SignalType::Reconnect => {
+                                // Loop! You call reconnect but never comeback!
+                                self.reconnect().await;
+                            },
+                            SignalType::Disconnect => {},
+                            SignalType::Cancel => {},
+                        }
+                    }
                 }
             }
             None => {
@@ -99,6 +114,11 @@ impl ClientContext {
 
         Ok(())
     }
+
+    // TODO: Create reconnect-dissconnect feature
+    async fn disconnect(&self) {}
+
+    async fn reconnect(&self) {}
 
     pub async fn on_connect(&self) {}
     pub async fn on_shutdown(&self) {}

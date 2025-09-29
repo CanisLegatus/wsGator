@@ -2,12 +2,11 @@ use crate::core::timer::TimerType;
 use futures::future::join_all;
 use std::pin::Pin;
 use std::time::Duration;
-use tokio_tungstenite::tungstenite::client;
 
 use crate::Arc;
-use crate::core::timer::Timer;
+use crate::core::timer::Signal;
 use async_trait::async_trait;
-use futures::{FutureExt, StreamExt, stream};
+use futures::{StreamExt, stream};
 use tokio::sync::watch::Sender as WatchSender;
 use tokio::task::JoinHandle;
 
@@ -16,6 +15,7 @@ use super::client_context::ClientContext;
 use super::error::WsGatorError;
 use super::monitor::Monitor;
 
+use crate::core::timer::SignalType;
 
 // Runner
 // Algorithm of a load
@@ -25,21 +25,21 @@ use super::monitor::Monitor;
 pub struct ClientBatch {
     amount: u32,
     url: String,
-    timer: Timer,
+    timer: Signal,
     behaviour: Arc<dyn Behaviour>,
     clients: Vec<ClientContext>,
-    stop_tx: Option<WatchSender<bool>>,
+    stop_tx: Option<WatchSender<SignalType>>,
 }
 
 impl ClientBatch {
     pub fn generate_from_list(
         amount: u32,
         url: String,
-        timer: Timer,
+        timer: Signal,
         behaviour: Arc<dyn Behaviour>,
-        stop_tx: Option<WatchSender<bool>>)
-    -> Self {
-        // TODO: Timertype should be considered
+        stop_tx: Option<WatchSender<SignalType>>,
+    ) -> Self {
+        // TODO: Signalype should be considered
         let clients: Vec<ClientContext> = (0..amount)
             .map(|id| {
                 // Creating a client context here
@@ -53,7 +53,14 @@ impl ClientBatch {
             })
             .collect();
 
-        ClientBatch { amount, url, timer, behaviour, clients, stop_tx, }
+        ClientBatch {
+            amount,
+            url,
+            timer,
+            behaviour,
+            clients,
+            stop_tx,
+        }
     }
 
     // If we need to generate one
@@ -76,17 +83,17 @@ pub trait Runner: Send + Sync {
         let common_config = self.get_common_config();
 
         // TODO: Timertype should be conusidered
-        let mut timer = Timer::new(TimerType::Outer);
+        let mut timer = Signal::new(TimerType::Outer);
         let stop_tx = timer.get_outer_timer();
 
         // TODO: Too heavy! Refactor
-        ClientBatch::generate_from_list
-            (common_config.connection_number,
-             common_config.url.clone(),
-             timer,
-             behaviour,
-             stop_tx,)
-
+        ClientBatch::generate_from_list(
+            common_config.connection_number,
+            common_config.url.clone(),
+            timer,
+            behaviour,
+            stop_tx,
+        )
     }
 
     // Function to manipulate start runners
@@ -100,7 +107,7 @@ pub trait Runner: Send + Sync {
         if let Some(stop_tx) = client_batch.stop_tx {
             tokio::spawn(async move {
                 let _ = tokio::time::sleep(connection_duration).await;
-                let _ = stop_tx.send(false);
+                let _ = stop_tx.send(SignalType::Cancel);
             });
         }
 
@@ -192,7 +199,7 @@ impl RampUpStrategy {
             if let Some(stop_tx) = client_batch.stop_tx {
                 tokio::spawn(async move {
                     let _ = tokio::time::sleep(connection_duration).await;
-                    let _ = stop_tx.send(false);
+                    let _ = stop_tx.send(SignalType::Cancel);
                 });
             }
 
@@ -224,7 +231,7 @@ impl RampUpStrategy {
             if let Some(stop_tx) = client_batch.stop_tx {
                 tokio::spawn(async move {
                     let _ = tokio::time::sleep(connection_duration).await;
-                    let _ = stop_tx.send(false);
+                    let _ = stop_tx.send(SignalType::Cancel);
                 });
             }
 
@@ -249,7 +256,7 @@ impl RampUpStrategy {
             result_vec
         })
     }
-//
+    //
     fn get_expotential(
         self,
         config: CommonRunnerConfig,
@@ -285,7 +292,7 @@ impl RampUpStrategy {
             if let Some(stop_tx) = client_batch.stop_tx {
                 tokio::spawn(async move {
                     let _ = tokio::time::sleep(connection_duration).await;
-                    let _ = stop_tx.send(false);
+                    let _ = stop_tx.send(SignalType::Cancel);
                 });
             }
 
@@ -328,9 +335,9 @@ pub struct RampUpRunner {
 
 pub struct SineRunner {
     pub common_config: CommonRunnerConfig,
-    min_connections: u32,
-    max_connections: u32,
-    period: u32,
+    pub min_connections: u32,
+    pub max_connections: u32,
+    pub period: u32,
 }
 
 impl SineRunner {}
@@ -372,10 +379,9 @@ impl Runner for SineRunner {
         &self,
         client_batch: ClientBatch,
     ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
-
         let config = self.get_common_config();
 
-        let timer_handle = tokio::spawn(async {tokio::time::sleep(Duration::from_secs(10))});
+        let timer_handle = tokio::spawn(async { tokio::time::sleep(Duration::from_secs(10)) });
 
         // Vector with current active connections
         let mut active_connections = vec![];
@@ -401,17 +407,25 @@ impl Runner for SineRunner {
                 // And then reconnect them
                 // This could be achieved by generating it
                 // TODO: Active task (remove as you work)
+
                 // This is upward loop
                 while active_connections.len() < self.max_connections as usize {
+                    // TODO: Don't be lazy! Create different basic actions without destruction
+
                     //active_connections.push(tokio::spawn(async move { client.run().await }));
                     //let new_connection = client_batch.generate_one(0);
                     tokio::time::sleep(pause_duration);
                 }
+
+                while active_connections.len() > self.min_connections as usize {
+                    if let Some(connection_handle) = active_connections.pop() {
+                        // TODO: change tactics to just turn off task instead
+                        connection_handle.abort();
+                    }
+                }
             }
-
-
         }
 
-       vec![]
+        vec![]
     }
 }

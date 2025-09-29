@@ -2,13 +2,13 @@ use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
 
 #[derive(Clone)]
-pub struct Timer {
-    reciever: Option<WatchReceiver<bool>>,
-    sender: Option<WatchSender<bool>>,
+pub struct Signal {
+    reciever: Option<WatchReceiver<SignalType>>,
+    sender: Option<WatchSender<SignalType>>,
     timer_type: TimerType,
 }
 
-impl Timer {
+impl Signal {
     pub fn new(timer_type: TimerType) -> Self {
         match timer_type {
             TimerType::Empty => Self {
@@ -17,7 +17,7 @@ impl Timer {
                 timer_type,
             },
             TimerType::Outer => {
-                let (stop_tx, stop_rx) = watch::channel(false);
+                let (stop_tx, stop_rx) = watch::channel(SignalType::Work);
                 Self {
                     reciever: Some(stop_rx),
                     sender: Some(stop_tx),
@@ -27,11 +27,11 @@ impl Timer {
         }
     }
 
-    pub fn get_outer_timer(&mut self) -> Option<WatchSender<bool>> {
+    pub fn get_outer_timer(&mut self) -> Option<WatchSender<SignalType>> {
         self.sender.take()
     }
 
-    pub fn get_outer_timer_reciever(&self) -> Option<WatchReceiver<bool>> {
+    pub fn get_outer_timer_reciever(&self) -> Option<WatchReceiver<SignalType>> {
         self.reciever.clone()
     }
 }
@@ -40,4 +40,12 @@ impl Timer {
 pub enum TimerType {
     Empty,
     Outer,
+}
+
+#[derive(Clone)]
+pub enum SignalType {
+    Work,
+    Disconnect,
+    Reconnect,
+    Cancel,
 }

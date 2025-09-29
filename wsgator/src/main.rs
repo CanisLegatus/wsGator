@@ -6,6 +6,7 @@ use core::runner::CommonRunnerConfig;
 use core::runner::LinearRunner;
 use core::runner::RampUpRunner;
 use core::runner::Runner;
+use core::runner::SineRunner;
 use std::sync::Arc;
 
 mod configs;
@@ -47,12 +48,15 @@ pub fn get_factories(args: &Args) -> Factories {
                         common_config: common_runner_config.clone(),
                     })
                 })
-            },
-            RunnerType::Sine => {
-                Box::new(move || {
-                    Box::new(SineRunner)
-                })
             }
+            RunnerType::Sine => Box::new(move || {
+                Box::new(SineRunner {
+                    common_config: common_runner_config.clone(),
+                    min_connections: 100,
+                    max_connections: 1000,
+                    period: 3000,
+                })
+            }),
         }
     };
 
