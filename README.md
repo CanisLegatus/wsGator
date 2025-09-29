@@ -254,4 +254,3 @@ MIT License - смотри файл [LICENSE](LICENSE) для деталей.
 ![Async](https://img.shields.io/badge/-Async%20First-blue?style=flat-square)
 
 </div>
-```
