@@ -241,7 +241,7 @@ impl Runner for YourCustomRunner {
 
 ## 📄 Лицензия
 
-MIT License - смотри файл [LICENSE](LICENSE) для деталей.
+GPL-3.0 License - смотри файл [LICENSE](LICENSE) для деталей.
 
 ---
 
