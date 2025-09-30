@@ -4,7 +4,7 @@
 
 ![Rust](https://img.shields.io/badge/rust-1.89+-orange?style=for-the-badge&logo=rust&logoColor=white)
 ![Tokio](https://img.shields.io/badge/async-tokio-blue?style=for-the-badge&logo=rust&logoColor=white)
-![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge&logo=gnu&logoColor=white)
+![License](https://img.shields.io/badge/license-GPL--3.0-green?style=for-the-badge&logo=gnu&logoColor=white)
 ![Architecture](https://img.shields.io/badge/architecture-event__driven-purple?style=for-the-badge&logo=archlinux&logoColor=white)
 
 **⚡ Производительность на уровне системы • 📊 Мониторинг в реальном времени • 🎯 Профессиональные стратегии тестирования**
