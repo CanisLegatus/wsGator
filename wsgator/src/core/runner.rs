@@ -32,6 +32,17 @@ pub struct ClientBatch {
 }
 
 impl ClientBatch {
+    pub async fn join_all(&mut self) {
+        let mut handles = vec![];
+
+        for client in &mut self.clients {
+            if let Some(handle) = client.get_connection_handle() {
+                handles.push(handle);
+            }
+        }
+
+        futures::future::join_all(handles).await;
+    }
     pub fn generate_from_list(
         amount: u32,
         url: String,
@@ -97,35 +108,32 @@ pub trait Runner: Send + Sync {
     }
 
     // Function to manipulate start runners
-    async fn run_clients(
-        &self,
-        client_batch: ClientBatch,
-    ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
+    async fn run_clients(&self, mut client_batch: ClientBatch) -> ClientBatch {
         let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
 
         // Spawning outside timer
-        if let Some(stop_tx) = client_batch.stop_tx {
+        if let Some(stop_tx) = &client_batch.stop_tx {
+            let stop_tx = stop_tx.clone();
             tokio::spawn(async move {
                 let _ = tokio::time::sleep(connection_duration).await;
                 let _ = stop_tx.send(SignalType::Disconnect);
             });
         }
 
-        stream::iter(client_batch.clients)
-            .map(|mut client| async move {
-                tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) })
-            })
-            .buffer_unordered(300)
-            .collect()
-            .await
+        for client in &mut client_batch.clients {
+            _ = client.connect().await;
+        }
+
+        client_batch
     }
 
     // Function to create, run and collect final results from ClientContexts
     async fn run(&self, behaviour: Arc<dyn Behaviour>) {
         let client_batch = self.create_clients(behaviour);
-        let join_handle_vec = self.run_clients(client_batch).await;
-        // TODO: Get all handles and check them for errors
-        join_all(join_handle_vec).await;
+        let mut client_batch = self.run_clients(client_batch).await;
+
+        // TODO: Huston we got some waiting issue here
+        client_batch.join_all().await;
     }
 }
 
@@ -242,13 +250,17 @@ impl RampUpStrategy {
                 counter += 1;
                 if counter <= step_size {
                     let handle =
-                        tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) });
+                        tokio::spawn(
+                            async move { client.connect().await.map_err(WsGatorError::from) },
+                        );
                     result_vec.push(handle);
                 } else {
                     tokio::time::sleep(step_duration).await;
                     counter = 1;
                     let handle =
-                        tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) });
+                        tokio::spawn(
+                            async move { client.connect().await.map_err(WsGatorError::from) },
+                        );
                     result_vec.push(handle);
                 }
             }
@@ -302,7 +314,9 @@ impl RampUpStrategy {
             for batch in batches {
                 let handles: Vec<JoinHandle<Result<(), WsGatorError>>> = stream::iter(batch)
                     .map(|mut client| {
-                        tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) })
+                        tokio::spawn(
+                            async move { client.connect().await.map_err(WsGatorError::from) },
+                        )
                     })
                     .collect()
                     .await;
@@ -357,14 +371,13 @@ impl Runner for RampUpRunner {
         &self.common_config
     }
 
-    async fn run_clients(
-        &self,
-        client_batch: ClientBatch,
-    ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
+    async fn run_clients(&self, client_batch: ClientBatch) -> ClientBatch {
         let strategy = self.strategy.clone();
-        strategy
-            .run(self.get_common_config().clone(), client_batch)
-            .await
+        //strategy
+        //bin/    .run(self.get_common_config().clone(), client_batch)
+        //    .await;
+
+        client_batch
     }
 }
 
@@ -375,22 +388,22 @@ impl Runner for SineRunner {
     }
 
     // TODO: Sine runner logic
-    async fn run_clients(
-        &self,
-        client_batch: ClientBatch,
-    ) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
+    async fn run_clients(&self, client_batch: ClientBatch) -> ClientBatch {
         let config = self.get_common_config();
 
-        let timer_handle = tokio::spawn(async { tokio::time::sleep(Duration::from_secs(10)) });
+        let timer_handle =
+            tokio::spawn(async { tokio::time::sleep(Duration::from_secs(10)).await });
+
+        // TODO: Warning! It turned off!
 
         // Vector with current active connections
-        let mut active_connections = vec![];
+        //let mut active_connections = vec![];
 
         // Starting initial connections
-        for mut client in client_batch.clients {
-            active_connections.push(tokio::spawn(async move { client.connect().await }));
-        }
-
+        //for mut client in client_batch.clients {
+        //bin/    active_connections.push(tokio::spawn(async move { client.connect().await }));
+        //}
+        /*
         while !timer_handle.is_finished() {
             // self.min_connections
             // self.max_connections
@@ -414,8 +427,8 @@ impl Runner for SineRunner {
 
                     //active_connections.push(tokio::spawn(async move { client.run().await }));
                     //let new_connection = client_batch.generate_one(0);
-                    tokio::time::sleep(pause_duration);
-                }
+                    tokio::time::sleep(pause_duration).await;
+            }
 
                 while active_connections.len() > self.min_connections as usize {
                     if let Some(connection_handle) = active_connections.pop() {
@@ -424,8 +437,8 @@ impl Runner for SineRunner {
                     }
                 }
             }
-        }
+        }*/
 
-        vec![]
+        client_batch
     }
 }

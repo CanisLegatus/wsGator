@@ -1,6 +1,8 @@
-use crate::core::error::WsGatorError;
+use std::fmt::Pointer;
+
 use crate::Arc;
 use crate::core::behaviour::Behaviour;
+use crate::core::error::WsGatorError;
 use crate::core::monitor::Monitor;
 use crate::core::timer::Signal;
 use crate::core::timer::SignalType;
@@ -9,7 +11,6 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -45,7 +46,6 @@ impl ClientContext {
         signal: Arc<Signal>,
         behaviour: Arc<dyn Behaviour>,
         monitor: Arc<Monitor>,
-
     ) -> Self {
         Self {
             id,
@@ -57,6 +57,10 @@ impl ClientContext {
             current_special_loop: None,
             current_connection: None,
         }
+    }
+
+    pub fn get_connection_handle(&mut self) -> Option<JoinHandle<()>> {
+        self.current_connection.take()
     }
 
     async fn get_ws_connection(
@@ -125,7 +129,6 @@ impl ClientContext {
         }));
 
         Ok(())
-
     }
 
     async fn disconnect(&self) {}
