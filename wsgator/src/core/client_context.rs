@@ -1,3 +1,4 @@
+use crate::core::error::WsGatorError;
 use crate::Arc;
 use crate::core::behaviour::Behaviour;
 use crate::core::monitor::Monitor;
@@ -6,7 +7,9 @@ use crate::core::timer::SignalType;
 use futures::StreamExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -17,28 +20,42 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 // Sending metrics to Monitor
 // Collecting Errors
 
+// Client Context work
+// - Client Context created (idle)
+// - Client context run (creates connection, keeps it running, can send message)
+// - Client context can receive - disconnect to send end frame and disconnect
+// - Client context can receive - reconnect to create a new connection
+// - Client context can receive - shutdown to drop everything (why do I need it? Isn't it just disconnect?)
+
 pub struct ClientContext {
     id: u32,
     url: String,
-    timer: Arc<Signal>,
+    signal: Arc<Signal>,
     behaviour: Arc<dyn Behaviour>,
     monitor: Arc<Monitor>,
+    current_writer: Option<JoinHandle<Result<(), WsGatorError>>>,
+    current_special_loop: Option<JoinHandle<()>>,
+    current_connection: Option<JoinHandle<()>>,
 }
 
 impl ClientContext {
     pub fn new(
         id: u32,
         url: String,
-        timer: Arc<Signal>,
+        signal: Arc<Signal>,
         behaviour: Arc<dyn Behaviour>,
         monitor: Arc<Monitor>,
+
     ) -> Self {
         Self {
             id,
             url,
-            timer,
+            signal,
             behaviour,
             monitor,
+            current_writer: None,
+            current_special_loop: None,
+            current_connection: None,
         }
     }
 
@@ -49,77 +66,67 @@ impl ClientContext {
         Ok(ws)
     }
 
-    pub async fn run(&mut self) -> Result<(), WsError> {
+    pub async fn connect(&mut self) -> Result<(), WsError> {
         // Starting our websocket
         let websocket = self.get_ws_connection().await?;
 
-        // Adding on_connect
-        self.on_connect().await;
-
+        // Splitting websocket
         let (sink, stream) = websocket.split();
 
-        // Starting message channel
+        // Starting message channel for writer
         let (message_tx, message_rx) = mpsc::channel::<Message>(128);
 
-        // Starting writer
-        // TODO: collect all handles!
+        // Get writer
         let writer = self.behaviour.get_writer(sink, message_rx);
+
+        // Get special behaviour loop
         let special_loop = self.behaviour.clone().get_special_loop();
+
+        // Get basic behaviour loop (recieveving messages and signals)
         let basic_loop = self
             .behaviour
             .clone()
             .get_basic_loop(stream, message_tx.clone());
 
-        // Lets start it!
+        // Starting writer and saving it
         if let Some(writer) = writer {
-            tokio::spawn(writer);
+            self.current_writer = Some(tokio::spawn(writer));
         }
 
-        // If special loop present - starting it
+        // Spawning special loop is available
         if let Some(special_loop) = special_loop {
-            tokio::spawn(special_loop);
+            self.current_special_loop = Some(tokio::spawn(special_loop));
         }
 
-        // Getting stop_tx clone for this client context
-        let stop_rx = self.timer.get_outer_timer_reciever();
+        // Getting signal_tx clone for this client context
+        let signal_rx = self.signal.get_outer_signal_reciever();
 
-        // TODO: MAJOR! I need to reinvent how client context works to do not let loops
+        self.current_connection = Some(tokio::spawn(async move {
+            match signal_rx {
+                // If there is external signal
+                Some(mut signal_tx) => {
+                    tokio::select! {
+                        _ = basic_loop => {},
+                        _ = signal_tx.changed() => {
 
-        match stop_rx {
-            Some(mut stop_tx) => {
-                tokio::select! {
-                    _ = basic_loop => {},
-                    _ = stop_tx.changed() => {
-
-                        let signal = stop_tx.borrow().clone();
-                        match signal {
-                            SignalType::Work => {},
-                            SignalType::Reconnect => {
-                                // Loop! You call reconnect but never comeback!
-                                self.reconnect().await;
-                            },
-                            SignalType::Disconnect => {},
-                            SignalType::Cancel => {},
+                            let signal = signal_tx.borrow().clone();
+                            match signal {
+                                SignalType::Disconnect => {
+                                    _ = message_tx.send(Message::Close(None)).await;
+                                },
+                            }
                         }
-                    }
+                    };
                 }
-            }
-            None => {
-                basic_loop.await;
-            }
-        }
-
-        // Hm, maybe some last second actions?
-        self.on_shutdown().await;
+                None => {
+                    basic_loop.await;
+                }
+            };
+        }));
 
         Ok(())
+
     }
 
-    // TODO: Create reconnect-dissconnect feature
     async fn disconnect(&self) {}
-
-    async fn reconnect(&self) {}
-
-    pub async fn on_connect(&self) {}
-    pub async fn on_shutdown(&self) {}
 }

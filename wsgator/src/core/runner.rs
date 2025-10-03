@@ -84,7 +84,7 @@ pub trait Runner: Send + Sync {
 
         // TODO: Timertype should be conusidered
         let mut timer = Signal::new(TimerType::Outer);
-        let stop_tx = timer.get_outer_timer();
+        let stop_tx = timer.get_outer_signal();
 
         // TODO: Too heavy! Refactor
         ClientBatch::generate_from_list(
@@ -107,13 +107,13 @@ pub trait Runner: Send + Sync {
         if let Some(stop_tx) = client_batch.stop_tx {
             tokio::spawn(async move {
                 let _ = tokio::time::sleep(connection_duration).await;
-                let _ = stop_tx.send(SignalType::Cancel);
+                let _ = stop_tx.send(SignalType::Disconnect);
             });
         }
 
         stream::iter(client_batch.clients)
             .map(|mut client| async move {
-                tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) })
+                tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) })
             })
             .buffer_unordered(300)
             .collect()
@@ -199,7 +199,7 @@ impl RampUpStrategy {
             if let Some(stop_tx) = client_batch.stop_tx {
                 tokio::spawn(async move {
                     let _ = tokio::time::sleep(connection_duration).await;
-                    let _ = stop_tx.send(SignalType::Cancel);
+                    let _ = stop_tx.send(SignalType::Disconnect);
                 });
             }
 
@@ -207,7 +207,7 @@ impl RampUpStrategy {
 
             for mut client in client_batch.clients {
                 let handle =
-                    tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                    tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) });
                 tokio::time::sleep(Duration::from_millis(delay_millis)).await;
                 result_vec.push(handle);
             }
@@ -231,7 +231,7 @@ impl RampUpStrategy {
             if let Some(stop_tx) = client_batch.stop_tx {
                 tokio::spawn(async move {
                     let _ = tokio::time::sleep(connection_duration).await;
-                    let _ = stop_tx.send(SignalType::Cancel);
+                    let _ = stop_tx.send(SignalType::Disconnect);
                 });
             }
 
@@ -242,13 +242,13 @@ impl RampUpStrategy {
                 counter += 1;
                 if counter <= step_size {
                     let handle =
-                        tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                        tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) });
                     result_vec.push(handle);
                 } else {
                     tokio::time::sleep(step_duration).await;
                     counter = 1;
                     let handle =
-                        tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) });
+                        tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) });
                     result_vec.push(handle);
                 }
             }
@@ -292,7 +292,7 @@ impl RampUpStrategy {
             if let Some(stop_tx) = client_batch.stop_tx {
                 tokio::spawn(async move {
                     let _ = tokio::time::sleep(connection_duration).await;
-                    let _ = stop_tx.send(SignalType::Cancel);
+                    let _ = stop_tx.send(SignalType::Disconnect);
                 });
             }
 
@@ -302,7 +302,7 @@ impl RampUpStrategy {
             for batch in batches {
                 let handles: Vec<JoinHandle<Result<(), WsGatorError>>> = stream::iter(batch)
                     .map(|mut client| {
-                        tokio::spawn(async move { client.run().await.map_err(WsGatorError::from) })
+                        tokio::spawn(async move { client.connect().await.map_err(WsGatorError::from) })
                     })
                     .collect()
                     .await;
@@ -388,7 +388,7 @@ impl Runner for SineRunner {
 
         // Starting initial connections
         for mut client in client_batch.clients {
-            active_connections.push(tokio::spawn(async move { client.run().await }));
+            active_connections.push(tokio::spawn(async move { client.connect().await }));
         }
 
         while !timer_handle.is_finished() {

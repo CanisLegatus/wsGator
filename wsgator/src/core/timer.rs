@@ -17,7 +17,7 @@ impl Signal {
                 timer_type,
             },
             TimerType::Outer => {
-                let (stop_tx, stop_rx) = watch::channel(SignalType::Work);
+                let (stop_tx, stop_rx) = watch::channel(SignalType::Disconnect);
                 Self {
                     reciever: Some(stop_rx),
                     sender: Some(stop_tx),
@@ -27,11 +27,11 @@ impl Signal {
         }
     }
 
-    pub fn get_outer_timer(&mut self) -> Option<WatchSender<SignalType>> {
+    pub fn get_outer_signal(&mut self) -> Option<WatchSender<SignalType>> {
         self.sender.take()
     }
 
-    pub fn get_outer_timer_reciever(&self) -> Option<WatchReceiver<SignalType>> {
+    pub fn get_outer_signal_reciever(&self) -> Option<WatchReceiver<SignalType>> {
         self.reciever.clone()
     }
 }
@@ -44,8 +44,5 @@ pub enum TimerType {
 
 #[derive(Clone)]
 pub enum SignalType {
-    Work,
     Disconnect,
-    Reconnect,
-    Cancel,
 }
