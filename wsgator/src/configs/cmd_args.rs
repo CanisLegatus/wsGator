@@ -107,7 +107,7 @@ impl Into<RampUpStrategy> for RampUpStrategyArgs {
             RampUpStrategyArgs::Expo {
                 growth_factor,
                 soaking_time,
-            } => RampUpStrategy::Expotential {
+            } => RampUpStrategy::Exponential {
                 growth_factor,
                 soaking_time,
             },

@@ -1,5 +1,4 @@
 use crate::core::timer::TimerType;
-use futures::future::join_all;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -158,7 +157,7 @@ pub enum RampUpStrategy {
         step_duration: u32,
         step_size: u32,
     },
-    Expotential {
+    Exponential {
         growth_factor: u32,
         soaking_time: u64,
     },
@@ -180,10 +179,10 @@ impl RampUpStrategy {
                 step_duration,
                 step_size,
             } => self.get_stepped(config, client_batch, step_duration, step_size),
-            RampUpStrategy::Expotential {
+            RampUpStrategy::Exponential {
                 growth_factor,
                 soaking_time,
-            } => self.get_expotential(config, client_batch, growth_factor, soaking_time),
+            } => self.get_exponential(config, client_batch, growth_factor, soaking_time),
             RampUpStrategy::Sine {
                 min_connections,
                 max_connections,
@@ -269,7 +268,7 @@ impl RampUpStrategy {
         })
     }
     //
-    fn get_expotential(
+    fn get_exponential(
         self,
         config: CommonRunnerConfig,
         client_batch: ClientBatch,
