@@ -23,8 +23,9 @@ use crate::core::timer::SignalType;
 
 pub struct ClientBatch {
     amount: u32,
+    duration: u64,
     url: String,
-    timer: Signal,
+    signal: Signal,
     behaviour: Arc<dyn Behaviour>,
     clients: Vec<ClientContext>,
     stop_tx: Option<WatchSender<SignalType>>,
@@ -44,8 +45,9 @@ impl ClientBatch {
     }
     pub fn generate_from_list(
         amount: u32,
+        duration: u64,
         url: String,
-        timer: Signal,
+        signal: Signal,
         behaviour: Arc<dyn Behaviour>,
         stop_tx: Option<WatchSender<SignalType>>,
     ) -> Self {
@@ -56,7 +58,7 @@ impl ClientBatch {
                 ClientContext::new(
                     id,
                     url.clone(),
-                    timer.clone().into(),
+                    signal.clone().into(),
                     behaviour.clone(),
                     Arc::new(Monitor {}),
                 )
@@ -65,12 +67,32 @@ impl ClientBatch {
 
         ClientBatch {
             amount,
+            duration,
             url,
-            timer,
+            signal,
             behaviour,
             clients,
             stop_tx,
         }
+    }
+
+    async fn run_clients(self, mut client_batch: ClientBatch) -> ClientBatch {
+        let connection_duration = Duration::from_secs(self.duration);
+
+        // Spawning outside timer
+        if let Some(stop_tx) = &client_batch.stop_tx {
+            let stop_tx = stop_tx.clone();
+            tokio::spawn(async move {
+                let _ = tokio::time::sleep(connection_duration).await;
+                let _ = stop_tx.send(SignalType::Disconnect);
+            });
+        }
+
+        for client in &mut client_batch.clients {
+            _ = client.connect().await;
+        }
+
+        client_batch
     }
 
     // If we need to generate one
@@ -78,7 +100,7 @@ impl ClientBatch {
         ClientContext::new(
             id,
             self.url.clone(),
-            self.timer.clone().into(),
+            self.signal.clone().into(),
             self.behaviour.clone(),
             Arc::new(Monitor {}),
         )
@@ -92,13 +114,13 @@ pub trait Runner: Send + Sync {
     fn create_clients(&self, behaviour: Arc<dyn Behaviour>) -> ClientBatch {
         let common_config = self.get_common_config();
 
-        // TODO: Timertype should be conusidered
         let mut timer = Signal::new(TimerType::Outer);
         let stop_tx = timer.get_outer_signal();
 
         // TODO: Too heavy! Refactor
         ClientBatch::generate_from_list(
             common_config.connection_number,
+            common_config.connection_duration,
             common_config.url.clone(),
             timer,
             behaviour,
@@ -131,7 +153,7 @@ pub trait Runner: Send + Sync {
         let client_batch = self.create_clients(behaviour);
         let mut client_batch = self.run_clients(client_batch).await;
 
-        // TODO: Huston we got some waiting issue here
+        // TODO: Collect errors
         client_batch.join_all().await;
     }
 }
@@ -187,9 +209,10 @@ impl RampUpStrategy {
                 min_connections,
                 max_connections,
                 period,
-            } => self.get_sine(),
+            } => self.get_sine(config, client_batch, min_connections, max_connections, period),
         }
     }
+
     fn get_linear(
         self,
         config: CommonRunnerConfig,
@@ -267,7 +290,7 @@ impl RampUpStrategy {
             result_vec
         })
     }
-    //
+
     fn get_exponential(
         self,
         config: CommonRunnerConfig,
@@ -329,7 +352,13 @@ impl RampUpStrategy {
     }
 
     // TODO: Implement RampUpRunner Sine
-    fn get_sine(self) -> RampUpRunnerFuture {
+    fn get_sine(self,
+                config: CommonRunnerConfig,
+                client_batch: ClientBatch,
+                min_connections: u32,
+                max_connections: u32,
+                period: u32) -> RampUpRunnerFuture {
+
         Box::pin(async move {
             let result_vec = vec![];
             result_vec

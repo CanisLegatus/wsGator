@@ -1,5 +1,3 @@
-use std::fmt::Pointer;
-
 use crate::Arc;
 use crate::core::behaviour::Behaviour;
 use crate::core::error::WsGatorError;
@@ -108,12 +106,12 @@ impl ClientContext {
         self.current_connection = Some(tokio::spawn(async move {
             match signal_rx {
                 // If there is external signal
-                Some(mut signal_tx) => {
+                Some(mut signal_rx) => {
                     tokio::select! {
                         _ = basic_loop => {},
-                        _ = signal_tx.changed() => {
+                        _ = signal_rx.changed() => {
 
-                            let signal = signal_tx.borrow().clone();
+                            let signal = signal_rx.borrow().clone();
                             match signal {
                                 SignalType::Disconnect => {
                                     _ = message_tx.send(Message::Close(None)).await;
