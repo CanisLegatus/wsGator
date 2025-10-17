@@ -87,9 +87,9 @@ pub enum RampUpStrategyArgs {
     },
 }
 
-impl Into<RampUpStrategy> for RampUpStrategyArgs {
-    fn into(self) -> RampUpStrategy {
-        match self {
+impl From<RampUpStrategyArgs> for RampUpStrategy {
+    fn from(value: RampUpStrategyArgs) -> RampUpStrategy {
+        match value {
             RampUpStrategyArgs::Linear {
                 target_connection,
                 ramp_duration,
