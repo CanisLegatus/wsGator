@@ -76,11 +76,11 @@ impl ClientBatch {
         }
     }
 
-    async fn run_clients(self, mut client_batch: ClientBatch) -> ClientBatch {
+    async fn run_clients(mut self) -> ClientBatch {
         let connection_duration = Duration::from_secs(self.duration);
 
         // Spawning outside timer
-        if let Some(stop_tx) = &client_batch.stop_tx {
+        if let Some(stop_tx) = &self.stop_tx {
             let stop_tx = stop_tx.clone();
             tokio::spawn(async move {
                 let _ = tokio::time::sleep(connection_duration).await;
@@ -88,11 +88,11 @@ impl ClientBatch {
             });
         }
 
-        for client in &mut client_batch.clients {
+        for client in &mut self.clients {
             _ = client.connect().await;
         }
 
-        client_batch
+        self
     }
 
     // If we need to generate one
@@ -129,23 +129,8 @@ pub trait Runner: Send + Sync {
     }
 
     // Function to manipulate start runners
-    async fn run_clients(&self, mut client_batch: ClientBatch) -> ClientBatch {
-        let connection_duration = Duration::from_secs(self.get_common_config().connection_duration);
-
-        // Spawning outside timer
-        if let Some(stop_tx) = &client_batch.stop_tx {
-            let stop_tx = stop_tx.clone();
-            tokio::spawn(async move {
-                let _ = tokio::time::sleep(connection_duration).await;
-                let _ = stop_tx.send(SignalType::Disconnect);
-            });
-        }
-
-        for client in &mut client_batch.clients {
-            _ = client.connect().await;
-        }
-
-        client_batch
+    async fn run_clients(&self, client_batch: ClientBatch) -> ClientBatch {
+       client_batch.run_clients().await
     }
 
     // Function to create, run and collect final results from ClientContexts
@@ -153,7 +138,7 @@ pub trait Runner: Send + Sync {
         let client_batch = self.create_clients(behaviour);
         let mut client_batch = self.run_clients(client_batch).await;
 
-        // TODO: Collect errors
+        // TODO: NEXT - WHERE TO IMPL LOGIC? Collect errors
         client_batch.join_all().await;
     }
 }
@@ -399,6 +384,7 @@ impl Runner for RampUpRunner {
         &self.common_config
     }
 
+    // TODO: RUN_CLIENTS - main logic to implement
     async fn run_clients(&self, client_batch: ClientBatch) -> ClientBatch {
         let strategy = self.strategy.clone();
         //strategy
