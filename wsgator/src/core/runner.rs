@@ -21,6 +21,7 @@ use crate::core::timer::SignalType;
 // Creation and management of connection pool
 // Passing params to ClientContext
 
+/// ClientBatch is structure to collect all common data and implement actions on clients
 pub struct ClientBatch {
     amount: u32,
     duration: u64,
@@ -29,6 +30,29 @@ pub struct ClientBatch {
     behaviour: Arc<dyn Behaviour>,
     clients: Vec<ClientContext>,
     stop_tx: Option<WatchSender<SignalType>>,
+}
+
+pub struct ClientBatchIter {
+    iter: std::vec::IntoIter<ClientContext>,
+}
+
+impl Iterator for ClientBatchIter {
+    type Item = ClientContext;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
+impl IntoIterator for ClientBatch {
+    type Item = ClientContext;
+    type IntoIter = ClientBatchIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ClientBatchIter {
+            iter: self.clients.into_iter(),
+        }
+    }
 }
 
 impl ClientBatch {
@@ -76,6 +100,7 @@ impl ClientBatch {
         }
     }
 
+    // WHY WHOULD CLIENT BATCH IMPLEMENT ANY LOGIC AT ALL?
     async fn run_clients(mut self) -> ClientBatch {
         let connection_duration = Duration::from_secs(self.duration);
 
@@ -88,28 +113,23 @@ impl ClientBatch {
             });
         }
 
+        // Basic logic of connection clients one by one
+        // THIS SHOULD BE EXTERNAL SIGNAL!
+        // PROBABLY WE NEED TO CREATE A FUNCTION! Like - connect_one
+        // And ClientBatch should survive till the end - it's their interface
+        // TODO: NEXT NEXT! Change it to interface! Don't forget about the timer
         for client in &mut self.clients {
             _ = client.connect().await;
         }
 
         self
     }
-
-    // If we need to generate one
-    pub fn generate_one(&self, id: u32) -> ClientContext {
-        ClientContext::new(
-            id,
-            self.url.clone(),
-            self.signal.clone().into(),
-            self.behaviour.clone(),
-            Arc::new(Monitor {}),
-        )
-    }
 }
 
+/// Trait which is describes logic of spawning clients
 #[async_trait]
 pub trait Runner: Send + Sync {
-    fn get_common_config(&self) -> &CommonRunnerConfig;
+    fn get_common_config(&self) -> CommonRunnerConfig;
 
     fn create_clients(&self, behaviour: Arc<dyn Behaviour>) -> ClientBatch {
         let common_config = self.get_common_config();
@@ -128,7 +148,7 @@ pub trait Runner: Send + Sync {
         )
     }
 
-    // Function to manipulate start runners
+    // Problem! Now ClientsBatch and Runner fighting for responsibility
     async fn run_clients(&self, client_batch: ClientBatch) -> ClientBatch {
        client_batch.run_clients().await
     }
@@ -176,7 +196,7 @@ pub enum RampUpStrategy {
 }
 
 impl RampUpStrategy {
-    fn run(self, config: CommonRunnerConfig, client_batch: ClientBatch) -> RampUpRunnerFuture {
+    fn get_strategy_future(self, config: CommonRunnerConfig, client_batch: ClientBatch) -> RampUpRunnerFuture {
         match self {
             RampUpStrategy::Linear {
                 target_connection,
@@ -373,32 +393,32 @@ impl RampUpRunner {}
 // Implementations
 #[async_trait]
 impl Runner for LinearRunner {
-    fn get_common_config(&self) -> &CommonRunnerConfig {
-        &self.common_config
+    fn get_common_config(&self) -> CommonRunnerConfig {
+        self.common_config.clone()
     }
 }
 
 #[async_trait]
 impl Runner for RampUpRunner {
-    fn get_common_config(&self) -> &CommonRunnerConfig {
-        &self.common_config
+    fn get_common_config(&self) -> CommonRunnerConfig {
+        self.common_config.clone()
     }
 
-    // TODO: RUN_CLIENTS - main logic to implement
-    async fn run_clients(&self, client_batch: ClientBatch) -> ClientBatch {
+    // Major function to implement RampUpRunner logic
+    // TODO: NEXT! Challenge - CLIENT BATCH HAS TO SURVIVE THIS!!!
+    async fn run_clients(&self, client_batch: ClientBatch) {
         let strategy = self.strategy.clone();
-        //strategy
-        //bin/    .run(self.get_common_config().clone(), client_batch)
-        //    .await;
 
-        client_batch
+        let strat_future = strategy.get_strategy_future(self.common_config.clone(), client_batch);
+        strat_future.await;
+        
     }
 }
 
 #[async_trait]
 impl Runner for SineRunner {
-    fn get_common_config(&self) -> &CommonRunnerConfig {
-        &self.common_config
+    fn get_common_config(&self) -> CommonRunnerConfig {
+        self.common_config.clone()
     }
 
     // TODO: Sine runner logic

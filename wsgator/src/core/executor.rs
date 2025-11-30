@@ -2,6 +2,7 @@ use super::{behaviour::Behaviour, runner::Runner};
 use crate::Arc;
 use crate::{configs::cmd_args::Args, get_factories};
 
+/// Executor is an high-level struct to create and manage runners and waves
 pub struct Executor {
     waves_number: u32,
     runner: Box<dyn Fn() -> Box<dyn Runner>>,
