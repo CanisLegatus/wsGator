@@ -1,176 +1,84 @@
-use futures::SinkExt;
-use futures::StreamExt;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::net::TcpListener;
-use tokio::sync::mpsc;
-use tokio::sync::watch;
-use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message};
+use clap::Parser;
+use futures::{SinkExt, StreamExt};
+use std::{net::SocketAddr, time::Duration};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    task::JoinSet,
+    time::timeout,
+};
+use tokio_tungstenite::{
+    accept_async,
+    tungstenite::{Error, Message},
+};
+use tokio_util::sync::CancellationToken;
 
+/// Local WebSocket echo server for wsGator smoke tests.
+#[derive(Parser)]
+#[command(version, about)]
+struct Args {
+    #[arg(long, default_value = "127.0.0.1:9001")]
+    bind: SocketAddr,
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let counter = Arc::new(AtomicU32::new(0));
-
-    let listener = TcpListener::bind("127.0.0.1:9001").await?;
-
-    println!("🚀 Server listening on ws://127.0.0.1:9001");
-
-    while let Ok((stream, _)) = listener.accept().await {
-        counter.fetch_add(1, Ordering::Relaxed);
-
-        println!(
-            "Starting connection. Current number is: {} <-----",
-            counter.load(Ordering::Relaxed)
-        );
-
-        match accept_async(stream).await {
-            Ok(ws_stream) => {
-                println!("New connection found!");
-                tokio::spawn(handle_ws(ws_stream, counter.clone()));
+    let args = Args::parse();
+    let listener = TcpListener::bind(args.bind).await?;
+    println!("Echo server listening on ws://{}", listener.local_addr()?);
+    let stop = CancellationToken::new();
+    let mut tasks = JoinSet::new();
+    let mut accepted = 0u64;
+    loop {
+        tokio::select! {
+            signal = tokio::signal::ctrl_c() => { signal?; break; }
+            result = listener.accept() => {
+                let (stream, _) = result?;
+                accepted += 1;
+                tasks.spawn(handle(stream, stop.clone()));
             }
-            Err(e) => {
-                println!("WebSocket connection Error: {e}");
-                continue;
+            Some(result) = tasks.join_next(), if !tasks.is_empty() => {
+                match result {
+                    Ok(Ok(())) => (),
+                    Ok(Err(e)) => eprintln!("Connection: {e}"),
+                    Err(e) => eprintln!("Task: {e}"),
+                }
             }
         }
     }
-
+    stop.cancel();
+    while tasks.join_next().await.is_some() {}
+    println!("Stopped; accepted {accepted} TCP connections");
     Ok(())
 }
-
-async fn handle_ws(ws_stream: WebSocketStream<tokio::net::TcpStream>, counter: Arc<AtomicU32>) {
-    let (mut write, mut read) = ws_stream.split();
-    let (msg_tx, mut msg_rx) = mpsc::channel::<Message>(1);
-    let (pong_tx, mut pong_rx) = mpsc::channel::<bool>(1);
-    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-
-    // Message writer task
-    let writer_task = tokio::spawn({
-        let mut shutdown_rx = shutdown_rx.clone();
-        async move {
-            loop {
-                tokio::select!(
-                    Some(msg) = msg_rx.recv() => {
-                        if write.send(msg)
-                            .await
-                            .is_err() {
-                                break;
-                            }
-                    },
-                    _ = shutdown_rx.changed() => {
-                        break;
-                    }
-                )
+async fn handle(stream: TcpStream, stop: CancellationToken) -> Result<(), String> {
+    let mut ws = tokio::select! {
+        _ = stop.cancelled() => return Ok(()),
+        result = timeout(Duration::from_secs(5), accept_async(stream)) => result.map_err(|_| "handshake timeout")?.map_err(|e| e.to_string())?,
+    };
+    loop {
+        tokio::select! {
+            _ = stop.cancelled() => {
+                let _ = timeout(Duration::from_secs(2), ws.close(None)).await;
+                return Ok(());
             }
-        }
-    });
-
-    // Message sender task
-    let reciever_task = tokio::spawn({
-        let msg_tx = msg_tx.clone();
-        let shutdown_tx = shutdown_tx.clone();
-        let mut shutdown_rx = shutdown_rx.clone();
-
-        async move {
-            loop {
-                tokio::select!(
-                    Some(message) = read.next() => {
-                        match message {
-                            Ok(Message::Text(txt)) => {
-                                println!("Message recieved: {txt}");
-                                //if let Err(_e) = msg_tx
-                                //    .send(Message::Text(format!("Server response: {}", txt).into()))
-                                //    .await { break; }
-                            }
-
-                            Ok(Message::Ping(data)) => {
-                                println!("Ping recieved!");
-                                if let Err(_e) = msg_tx
-                                    .send(Message::Pong(data))
-                                    .await { break; }
-                            }
-
-                            Ok(Message::Pong(_data)) => {
-                                println!("Pong Recieved!");
-                                if let Err(_e) = pong_tx
-                                    .send(true)
-                                    .await { break; }
-                            }
-
-                            Ok(Message::Close(_)) => {
-                                println!("Client closed connection");
-                                let _ = shutdown_tx.send(true);
-                                break;
-                            }
-
-                            _ => {}
-                        }
-                    },
-
-                    _ = shutdown_rx.changed() => {
-                        break;
+            message = ws.next() => {
+                let reply = match message {
+                    Some(Ok(m @ (Message::Text(_) | Message::Binary(_)))) => Some(m),
+                    Some(Ok(Message::Ping(_))) => None,
+                    Some(Ok(Message::Close(_))) => {
+                        let _ = timeout(Duration::from_secs(2), ws.flush()).await;
+                        return Ok(());
                     }
-                );
-            }
-        }
-    });
-
-    let ping_task = tokio::spawn({
-        let msg_tx = msg_tx.clone();
-        let shutdown_tx = shutdown_tx.clone();
-
-        async move {
-            let mut inteval = tokio::time::interval(Duration::from_secs(30));
-            loop {
-                tokio::select! (
-
-                _ = inteval.tick() => {
-                    println!("Sending ping!");
-                    if let Err(_e) = msg_tx
-                        .send(Message::Ping("ping".into()))
-                        .await { break; }
-
-                    let pong_timer =
-                        tokio::time::timeout(Duration::from_secs(60), pong_rx.recv()).await;
-
-                    match pong_timer {
-                        Ok(_) => {
-                            continue;
-                        }
-
-                        _ => {
-                            let _ = shutdown_tx.send(true);
-                            println!("Ew! Dead connection - no Pong response... closing!");
-                            break;
-                        }
-                }},
-
-                _ = shutdown_rx.changed() => {
-                    break;
+                    None | Some(Err(Error::ConnectionClosed)) => return Ok(()),
+                    Some(Err(e)) => return Err(e.to_string()),
+                    _ => continue,
+                };
+                tokio::select! {
+                    _ = stop.cancelled() => return Ok(()),
+                    result = timeout(Duration::from_secs(5), async {
+                        if let Some(m) = reply { ws.send(m).await } else { ws.flush().await }
+                    }) => result.map_err(|_| "write timeout")?.map_err(|e| e.to_string())?,
                 }
-
-
-                )
             }
         }
-    });
-
-    tokio::select!(
-        _ = ping_task => {},
-        _ = reciever_task => {},
-        _ = writer_task => {},
-    );
-
-    let _ = shutdown_tx.send(true);
-    drop(msg_tx);
-    println!("Ok... another connection closed!");
-
-    counter.fetch_sub(1, Ordering::Relaxed);
-
-    println!(
-        "------> CLOSED CONNECTION. Current number is: {} <-----",
-        counter.load(Ordering::Relaxed)
-    );
+    }
 }

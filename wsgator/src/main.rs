@@ -1,92 +1,60 @@
-use crate::configs::config_types::*;
 use clap::Parser;
-use core::behaviour::*;
-use core::executor::Executor;
-use core::runner::CommonRunnerConfig;
-use core::runner::LinearRunner;
-use core::runner::RampUpRunner;
-use core::runner::Runner;
-use core::runner::SineRunner;
-use std::sync::Arc;
-
-mod configs;
-mod core;
-
-use configs::cmd_args::*;
-use core::error_log::*;
-
-type Factories = (
-    Box<dyn Fn() -> Box<dyn Runner>>,
-    Box<dyn Fn() -> Arc<dyn Behaviour>>,
-);
-
-pub fn get_factories(args: &Args) -> Factories {
-    let common_runner_config = CommonRunnerConfig {
-        url: args.url.clone(),
-        connection_number: args.connection_number,
-        connection_duration: args.connection_duration,
-    };
-
-    let runner_factory: Box<dyn Fn() -> Box<dyn Runner>> = {
-        match &args.runner {
-            RunnerType::NoChoice => Box::new(move || {
-                Box::new(LinearRunner {
-                    common_config: common_runner_config.clone(),
-                }) as Box<dyn Runner>
-            }),
-            RunnerType::Flat => Box::new(move || {
-                Box::new(LinearRunner {
-                    common_config: common_runner_config.clone(),
-                }) as Box<dyn Runner>
-            }),
-            RunnerType::RampUp { strategy } => {
-                let strategy = strategy.clone();
-
-                Box::new(move || {
-                    Box::new(RampUpRunner {
-                        strategy: strategy.clone().into(),
-                        common_config: common_runner_config.clone(),
-                    })
-                })
-            }
-            RunnerType::Sine => Box::new(move || {
-                Box::new(SineRunner {
-                    common_config: common_runner_config.clone(),
-                    min_connections: 100,
-                    max_connections: 1000,
-                    period: 3000,
-                })
-            }),
-        }
-    };
-
-    let behaviour_factory = {
-        match args.behavior {
-            BehaviourType::NoChoice => || Arc::new(DefaultBehaviour {}) as Arc<dyn Behaviour>,
-            BehaviourType::PingPong => || Arc::new(PingPongBehaviour {}) as Arc<dyn Behaviour>,
-            BehaviourType::Silent => || Arc::new(SilentBehaviour {}) as Arc<dyn Behaviour>,
-            BehaviourType::Flood => || Arc::new(FloodBehaviour {}) as Arc<dyn Behaviour>,
-        }
-    };
-
-    (Box::new(runner_factory), Box::new(behaviour_factory))
-}
+use std::{
+    io::{self, Write},
+    path::Path,
+    process::ExitCode,
+};
+use tokio_util::sync::CancellationToken;
+use wsgator::config::Config;
 
 #[tokio::main]
-async fn main() {
-    let args = Args::parse();
-    let error_log = ErrorLog::new();
-
-    let executor = Executor::from_args(args);
-
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            println!("\n---> Interrupted by ctrl + c");
+async fn main() -> ExitCode {
+    let config = Config::parse();
+    let json_path = config.json.clone();
+    let stop = CancellationToken::new();
+    let run = wsgator::run(config, stop.clone());
+    tokio::pin!(run);
+    let result = tokio::select! {
+        result = &mut run => result,
+        signal = tokio::signal::ctrl_c() => {
+            if let Err(e) = signal { eprintln!("Cannot listen for Ctrl+C: {e}"); }
+            stop.cancel();
+            eprintln!("Stopping clients and collecting the report…");
+            run.await
         }
-        _ = executor.run() => {
-            println!("---> Executor finished normally...");
+    };
+    let report = match result {
+        Ok(report) => report,
+        Err(e) => {
+            eprintln!("wsGator: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let summary = report.summary();
+    if json_path.as_deref() == Some(Path::new("-")) {
+        eprint!("{summary}");
+    } else if let Err(e) = io::stdout().lock().write_all(summary.as_bytes()) {
+        eprintln!("Cannot write summary: {e}");
+        return ExitCode::from(2);
+    }
+    if let Some(path) = json_path {
+        let mut json = serde_json::to_vec_pretty(&report).expect("report serializes");
+        json.push(b'\n');
+        let result = if path == Path::new("-") {
+            io::stdout().lock().write_all(&json)
+        } else {
+            std::fs::write(&path, json)
+        };
+        if let Err(e) = result {
+            eprintln!("Cannot write JSON report: {e}");
+            return ExitCode::from(2);
         }
     }
-
-    println!("---> Logs:\n{error_log}");
+    if report.interrupted {
+        ExitCode::from(130)
+    } else if report.has_errors() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }

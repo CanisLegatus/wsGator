@@ -1,11 +1,6 @@
-
-
 [workspace]
-members = [
-  "ws-mini-server",
-  "wsgator",
-]
-
+members = ["ws-mini-server", "wsgator"]
+default-members = ["wsgator"]
 resolver = "3"
 
 [workspace.package]

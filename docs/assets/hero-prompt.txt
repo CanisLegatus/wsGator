@@ -1,0 +1,4 @@
+Asset: wsgator-hero.png
+Tool: built-in imagegen
+
+Use case: stylized-concept. Asset: wide GitHub README hero banner for wsGator, a WebSocket load-testing CLI. Existing project identity is playful alligator emoji, green, Rust and terminal engineering. Create a striking polished editorial mascot illustration: a powerful emerald green alligator biting a metal server rack, jaws wrapped around the server, glowing network cables and packet trails conveying controlled stress testing. Dark charcoal background, vivid green and restrained electric cyan/orange server indicator accents, crisp silhouette, sophisticated graphic shading, playful technical attitude. Wide landscape composition, alligator and server fully readable, generous margins. Include only the exact title 'wsGator' in clean bold typography. No extra slogans, no watermark, no gore.

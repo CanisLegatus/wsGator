@@ -1,10 +1,14 @@
 [package]
 name = "ws-mini-server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+rust-version = "1.88"
 license = { workspace = true }
+publish = false
 
 [dependencies]
-futures = "0.3.31"
-tokio = { version = "1.44.2", features = ["full"] }
+clap = { version = "4.5", features = ["derive"] }
+futures = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "time"] }
 tokio-tungstenite = "0.26.2"
+tokio-util = { version = "0.7", features = ["rt"] }

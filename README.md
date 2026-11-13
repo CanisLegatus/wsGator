@@ -1,256 +1,161 @@
-# 🐊 wsGator - Enterprise-Grade WebSocket Load Testing Framework
+![wsGator — an alligator stress-testing a server](docs/assets/wsgator-hero.png)
 
-<div align="center">
+# wsGator
 
-![Rust](https://img.shields.io/badge/rust-1.89+-orange?style=for-the-badge&logo=rust&logoColor=white)
-![Tokio](https://img.shields.io/badge/async-tokio-blue?style=for-the-badge&logo=rust&logoColor=white)
-![License](https://img.shields.io/badge/license-GPL--3.0-green?style=for-the-badge&logo=gnu&logoColor=white)
-![Architecture](https://img.shields.io/badge/architecture-event__driven-purple?style=for-the-badge&logo=archlinux&logoColor=white)
+A focused WebSocket load-testing CLI, written in Rust. Hold concurrent connections, measure heartbeat round trips, or send paced messages — with one binary and no scenario script.
 
-**⚡ Производительность на уровне системы • 📊 Мониторинг в реальном времени • 🎯 Профессиональные стратегии тестирования**
+[![CI](https://github.com/CanisLegatus/wsGator/actions/workflows/ci.yml/badge.svg)](https://github.com/CanisLegatus/wsGator/actions/workflows/ci.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-green)](LICENSE)
 
-</div>
+## Scope
 
-wsGator - это высокопроизводительный фреймворк для нагрузочного тестирования WebSocket соединений, написанный на Rust. Спроектирован для тестирования enterprise-приложений с требованием к тысячам одновременных соединений.
+Version 0.2 provides a single-machine, flat-load MVP with three working client behaviors:
 
-## 🚀 Ключевые особенности
+| Command | Behavior | Controls |
+| --- | --- | --- |
+| `silent` | Keeps the socket open, reads incoming messages, and answers server Ping frames. Sends no application messages. | Connection count, run duration, connection/write/close timeouts |
+| `ping-pong` | Sends WebSocket Ping frames, waits for matching Pong payloads, and measures RTT. At most one Ping is outstanding per client. | `--interval`, `--timeout`, common connection controls |
+| `flood` | Sends text or binary messages at a configured rate and reads incoming traffic. | `--rate`, `--message` or `--payload-file`, `--binary`, common connection controls |
 
-### 🎯 Умные стратегии нагрузки
-- **📈 Ramp-Up стратегии**: Линейная, ступенчатая, экспоненциальная, синусоидальная
-- **🌊 Волновое тестирование**: Настраиваемое количество волн с паузами
-- **⚡ Плоская нагрузка**: Мгновенное создание тысяч соединений
+All modes support `ws://`, verified `wss://`, custom HTTP headers, a WebSocket subprotocol, bounded shutdown, terminal summaries, and JSON reports. Each client owns its connection until shutdown completes; there are no detached reader or writer tasks.
 
-### 🎭 Поведенческие паттерны клиентов
+## Install
 
-```rust
-// Расширяемая система поведения через трейты
-#[async_trait]
-pub trait Behaviour: Send + Sync {
-    fn on_message(&self, message: Message) -> Option<Message>;
-    async fn on_connect(&self, id: u32, message_tx: &MpscSender<Message>);
-    // ... и многое другое
-}
+Requires Rust **1.88+** and a native build toolchain (a C compiler is needed for the TLS dependency).
+
+```sh
+git clone https://github.com/CanisLegatus/wsGator.git
+cd wsGator
+cargo install --path wsgator --locked
+wsgator --help
 ```
 
-- **🤫 Тихий клиент** - пассивное слушание
-- **🏓 Ping-Pong** - полная имитация реального клиента  
-- **💥 Flood** - агрессивная отправка сообщений
-- **🔧 Кастомные поведения** - легкое расширение под любые сценарии
+Alternatively, run from the repository:
 
-### 📊 Профессиональный мониторинг
-- **Real-time метрики** подключений и ошибок
-- **Детальная классификация ошибок** (WebSocket, каналы, таймауты)
-- **Atomic-счетчики** для минимальных накладных расходов
-
-## 🏗 Архитектурные преимущества
-
-### Модульная архитектура
-```
-core/
-├── behaviour/    # Паттерны поведения
-├── runner/       # Стратегии нагрузки  
-├── monitor/      # Сбор метрик
-├── timer/        # Управление временем
-└── error/        # Система обработки ошибок
+```sh
+cargo run --release -- silent --url ws://127.0.0.1:9001 -c 100 -d 30s
 ```
 
-### Zero-Cost Abstractions
+## Quick start
 
-```rust
-// Стратегия преобразуется в compile-time диспетчеризацию
-impl Into<RampUpStrategy> for RampUpStrategyArgs {
-    fn into(self) -> RampUpStrategy {
-        match self {
-            RampUpStrategyArgs::Linear { ... } => RampUpStrategy::Linear { ... },
-            // ...
-        }
-    }
-}
+Start the included local echo server in another terminal:
+
+```sh
+cargo run --release -p ws-mini-server -- --bind 127.0.0.1:9001
 ```
 
-### Async-first дизайн
+Then choose a behavior:
 
-```rust
-pub async fn run(&mut self) -> Result<(), WsError> {
-    let websocket = self.get_ws_connection().await?;
-    let (sink, stream) = websocket.split();
-    
-    // Параллельная обработка чтения/записи
-    tokio::select! {
-        _ = basic_loop => {},
-        _ = stop_tx.changed() => { /* graceful shutdown */ }
-    }
-}
+```sh
+# Keep 100 connections open for a 30-second observation window.
+wsgator silent --url ws://127.0.0.1:9001 -c 100 -d 30s --progress
+
+# Ping every second; fail a client if its matching Pong takes more than 3 seconds.
+wsgator ping-pong --url ws://127.0.0.1:9001 -c 100 -d 30s \
+  --interval 1s --timeout 3s
+
+# Each of 50 clients sends up to 20 messages/second: nominal total 1,000/s.
+wsgator flood --url ws://127.0.0.1:9001 -c 50 -d 30s \
+  --rate 20 --message '{"event":"load-test"}' --json report.json
+
+# Reuse the exact bytes from a file for every binary message.
+wsgator flood --url ws://127.0.0.1:9001 -c 10 -d 1m \
+  --rate 5 --payload-file payload.bin --binary
 ```
 
-## 🛠 Технический стек
+Use `wsgator <command> --help` for behavior options. Common options work before or after the command.
 
-<div align="center">
+### TLS, authentication, and subprotocols
 
-![Rust](https://img.shields.io/badge/-Rust-000000?style=flat-square&logo=rust&logoColor=white)
-![Tokio](https://img.shields.io/badge/-Tokio-000000?style=flat-square&logo=rust&logoColor=white)
-![WebSocket](https://img.shields.io/badge/-WebSocket-000000?style=flat-square&logo=websocket&logoColor=white)
-![Async](https://img.shields.io/badge/-Async%2Fawait-000000?style=flat-square&logo=rust&logoColor=white)
-![CLI](https://img.shields.io/badge/-CLI-000000?style=flat-square&logo=windowsterminal&logoColor=white)
+```sh
+wsgator silent --url wss://example.com/socket -c 100 -d 1m \
+  --header 'Authorization: Bearer YOUR_TOKEN' \
+  --subprotocol example.v1
 
-</div>
-
-- **🚀 Rust** - производительность и безопасность памяти
-- **⚡ Tokio** - асинхронная runtime
-- **🔌 Tokio-Tungstenite** - WebSocket реализация  
-- **📡 Async-trait** - асинхронные полиморфные поведения
-- **🎯 Clap** - профессиональный CLI интерфейс
-
-## 📦 Установка и использование
-
-### Требования
-- Rust 1.89+
-- Tokio runtime
-
-### Быстрый старт
-
-```bash
-# Клонирование репозитория
-git clone https://github.com/yourusername/wsgator.git
-cd wsgator
-
-# Запуск теста с линейным наращиванием нагрузки
-cargo run -- \
-    --url ws://localhost:8080 \
-    --runner ramp-up \
-    --behavior ping-pong \
-    --connection-number 1000 \
-    --waves-number 3
+# Add a private CA without disabling certificate or hostname verification.
+wsgator ping-pong --url wss://localhost:9443/socket --ca-cert local-ca.pem
 ```
 
-### Примеры использования
+Headers are repeatable. Reserved WebSocket handshake headers are generated by the client; use `--subprotocol` for protocol negotiation. The server must select the offered subprotocol. Public CA roots are bundled; `--ca-cert` adds PEM certificates. HTTP redirects and automatic reconnection are not supported.
 
-**Экспоненциальный рост нагрузки:**
+## Load and timing semantics
 
-```bash
-cargo run -- \
-    --url ws://your-server:8080 \
-    --runner ramp-up exponential \
-    --growth-factor 2 \
-    --soaking-time 2000 \
-    --connection-number 5000 \
-    --connection-duration 60
+- `--connections` (`-c`, default `100`) is the number of clients scheduled once. Failed clients are not replaced.
+- `--duration` (`-d`, default `30s`) is the **whole observation window**, including connection setup. It starts after local payload/CA preparation. Clients that connect later have less time to exchange traffic.
+- Handshakes run concurrently, limited by `--connect-concurrency` (default `256`). `--connect-timeout` (default `10s`) covers DNS, TCP, TLS, and WebSocket negotiation after a client gets a handshake slot.
+- At the deadline, queued and connecting clients are cancelled; active clients perform a bounded close handshake. Shutdown drain time is reported separately from the load duration. A run that cannot attempt all clients or still has pending handshakes at its deadline is marked `load_incomplete`.
+- The observation window remains open even if every client fails early, so failure runs use the same configured time window.
+- Flood's `--rate` is **per connected client**, with the first message sent immediately. Scheduling and backpressure can reduce the achieved rate. Missed send slots are skipped and counted; the generator does not compensate with catch-up bursts.
+- Ping-pong sends its first Ping immediately. If a Pong takes longer than the interval, the next Ping waits for it. Only a matching Pong completes an RTT sample; an unrelated Pong does not reset the timeout.
+- `--write-timeout` defaults to `5s`; `--close-timeout` defaults to `2s`. Durations accept units such as `250ms`, `30s`, and `2m` (range: `1ms` to `7days`).
+- Ctrl+C cancels connection setup, closes active clients, waits for their tasks, and writes a partial report.
+
+The default incoming message/frame limit is 1 MiB (`--max-message-bytes`). Flood payloads are limited to 16 MiB, loaded once, and shared by clients. Text payload files must contain valid UTF-8. WebSocket read/write buffers start at 16 KiB per connection and can grow to accommodate messages.
+
+## Reports and automation
+
+The terminal summary includes successful and peak active connections, application message/byte counts, achieved rates, error categories, and handshake/Ping RTT percentiles. `--progress` prints one status update per second to stderr.
+
+```sh
+# Human summary on stdout; JSON in a file.
+wsgator flood -c 20 -d 10s --rate 10 --json report.json
+
+# JSON only on stdout; human summary on stderr.
+wsgator ping-pong -c 20 -d 10s --json - > report.json
 ```
 
-**Ступенчатое тестирование:**
+JSON has a versioned schema (`schema_version: 1`) and includes:
 
-```bash
-cargo run -- \
-    --url ws://your-server:8080 \
-    --runner ramp-up steps \
-    --step-duration 1000 \
-    --step-size 50 \
-    --waves-number 5 \
-    --waves-pause 10
+- Run settings: target, behavior, durations, timeouts, connection concurrency, message limit, payload size, rate, and heartbeat settings.
+- Connection accounting: `attempted`, `connected`, `peak_active`, `completed`, `active_at_end`, `cancelled_connects`, and `not_attempted`.
+- Application traffic: `messages_sent`, `messages_received`, `bytes_sent`, `bytes_received`, and rates over the load duration.
+- Control traffic: Ping/Pong counters, `pending_pings_at_stop`, and `ping_rtt`.
+- `handshake` and `ping_rtt`: sample count, min, mean, p50, p95, p99, and max in milliseconds. Empty measurements are `null`. Histograms use microsecond resolution, three significant digits, and bounded memory.
+- `errors`: category-to-count mapping. Handshake failures, early server closes, protocol errors, missing Pongs, write/close timeouts, and incomplete load are failures.
+
+Message and byte counters cover completed application sends and received text/binary payloads during client sessions; they exclude protocol overhead and shutdown drain traffic. Pong counters include unsolicited Pongs; RTT samples only include matching responses. An in-flight Ping cancelled by the run deadline is counted separately and is not a Pong timeout. Ping RTT measures the WebSocket heartbeat, not application processing latency.
+
+Header values, payload contents, and URL query strings are omitted from reports. Error categories do not include server response bodies. `target` retains the URL path; avoid putting secrets in path segments. Command-line secrets may still be visible in your shell history and process list.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Completed observation window without recorded failures |
+| `1` | Completed with connection, traffic, shutdown, or incomplete-load failures |
+| `2` | Invalid arguments, local setup failure, or report output failure |
+| `130` | Interrupted by Ctrl+C; partial report emitted if output succeeds |
+
+## Limits
+
+This version implements flat load only. It does not implement ramp-up curves, waves, distributed workers, application login/subscription scripts, Socket.IO, WAMP, or automatic reconnects. The earlier experimental runner/behavior CLI has been replaced by the three commands above.
+
+Achievable concurrency and traffic depend on the generator's CPU, memory, network, file descriptor limits, and available local ports. A requested rate is a scheduling target, not a throughput guarantee. No fixed connection-capacity or latency claims are made without a reproducible benchmark.
+
+## Development
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-**Синусоидальная нагрузка (имитация суточных циклов):**
+Integration tests use local servers to exercise all three behaviors, heartbeat correlation and timeouts, text/binary payloads, HTTP authentication, subprotocol negotiation, verified TLS, handshake failures, message limits, early disconnects, bounded shutdown, JSON output, and process exit codes. Unix tests also exercise Ctrl+C. CI runs on Linux, macOS, and Windows, with a separate minimum-Rust-version job.
 
-```bash
-cargo run -- \
-    --url ws://your-server:8080 \
-    --runner sine \
-    --min-connections 100 \
-    --max-connections 1000 \
-    --period 300
-```
+`wsgator` contains the CLI and load engine. `ws-mini-server` is a local echo utility: it echoes text/binary messages, answers Ping frames, and completes close handshakes without per-message logging.
 
-## 🔧 Расширение функциональности
+## Roadmap
 
-### Создание кастомного поведения
+- [x] Flat-load CLI with Silent, Ping-pong, and paced Flood behaviors
+- [x] Verified TLS, headers, subprotocols, timeouts, and owned client tasks
+- [x] Terminal/JSON reporting and local integration tests
+- [ ] Reproducible performance benchmarks and generator resource measurements
+- [ ] Ramp-up and stepped profiles with independently defined ramp/hold/drain phases
+- [ ] Config files and application sequences: connect, authenticate, subscribe, send
+- [ ] Application-level response correlation and latency measurements
+- [ ] CI thresholds for error rates, connection targets, and latency percentiles
+- [ ] Reconnect policies and reconnect-storm scenarios
+- [ ] Prometheus/OpenTelemetry export
+- [ ] Evaluate distributed workers after single-machine scheduling and reporting stabilize
 
-```rust
-#[async_trait]
-impl Behaviour for YourCustomBehaviour {
-    fn on_message(&self, message: Message) -> Option<Message> {
-        // Ваша бизнес-логика
-        Some(Message::Text("Custom response".into()))
-    }
-    
-    async fn on_connect(&self, id: u32, message_tx: &MpscSender<Message>) {
-        // Кастомная логика подключения
-        let _ = message_tx.send(Message::Text(format!("Client {} ready!", id))).await;
-    }
-}
-```
+## License
 
-### Добавление новой стратегии нагрузки
-
-```rust
-#[async_trait]
-impl Runner for YourCustomRunner {
-    async fn run_clients(&self, client_batch: ClientBatch) -> Vec<JoinHandle<Result<(), WsGatorError>>> {
-        // Ваша инновационная стратегия
-        // ...
-    }
-}
-```
-
-## 📈 Производительность
-
-<div align="center">
-
-| Метрика | Значение |
-|---------|----------|
-| **Максимальные соединения** | 🚀 10,000+ |
-| **Задержка обработки** | ⚡ Наносекунды |
-| **Потребление памяти** | 💾 Минимальное |
-| **Hot Path аллокации** | ✅ Zero-allocation |
-
-</div>
-
-## 🎯 Для кого этот проект?
-
-<div align="center">
-
-![Backend](https://img.shields.io/badge/-Backend%20Developers-6e5494?style=for-the-badge)
-![QA](https://img.shields.io/badge/-QA%20Engineers-00b4ab?style=for-the-badge)
-![DevOps](https://img.shields.io/badge/-DevOps-00d4aa?style=for-the-badge)
-![Rustaceans](https://img.shields.io/badge/-Rustaceans-orange?style=for-the-badge)
-
-</div>
-
-- **Backend разработчики** - тестирование scalability ваших WebSocket серверов
-- **QA инженеры** - создание комплексных нагрузочных тестов
-- **DevOps команды** - проверка инфраструктуры под нагрузкой
-- **Rust энтузиасты** - изучение продвинутых асинхронных паттернов
-
-## 🔮 Roadmap
-
-- [ ] 🌐 Web интерфейс для мониторинга тестов в реальном времени
-- [ ] 🔄 Поддержка протокола WAMP
-- [ ] 📊 Интеграция с Prometheus/Grafana
-- [ ] 📄 Генерация детальных отчетов в PDF/HTML
-- [ ] 🌍 Поддержка распределенного тестирования
-
-## 🤝 Contributing
-
-<div align="center">
-
-![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)
-![Issues](https://img.shields.io/badge/Issues-welcome-blue.svg?style=for-the-badge)
-
-</div>
-
-Мы приветствуем вклад в развитие wsGator! Пожалуйста, не стесняйтесь отправлять PR, создавать issues или предлагать новые фичи.
-
-## 📄 Лицензия
-
-GPL-3.0 License - смотри файл [LICENSE](LICENSE) для деталей.
-
----
-
-<div align="center">
-
-**Сделано с ❤️ на Rust** 
-
-![Rust](https://img.shields.io/badge/-Rust-orange?style=flat-square&logo=rust&logoColor=white)
-![Performance](https://img.shields.io/badge/-Performance%20Matters-red?style=flat-square)
-![Async](https://img.shields.io/badge/-Async%20First-blue?style=flat-square)
-
-</div>
+[GPL-3.0-or-later](LICENSE).
