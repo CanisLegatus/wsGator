@@ -295,7 +295,10 @@ async fn refused_connections_cannot_produce_a_success_report() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     drop(listener);
-    let report = run(config(&url, &["silent"])).await;
+    // Windows may delay ECONNREFUSED beyond a short traffic observation window.
+    let mut cfg = config(&url, &["silent"]);
+    cfg.duration = Duration::from_secs(3);
+    let report = run(cfg).await;
     assert_eq!(report.connected, 0);
     assert_eq!(report.attempted, 3);
     assert_eq!(report.errors.get("connect_io_connectionrefused"), Some(&3));
@@ -509,7 +512,8 @@ async fn headers_and_subprotocol_work_and_secrets_are_not_in_the_report() {
 #[tokio::test]
 async fn tls_verifies_certificates_and_accepts_an_explicit_ca() {
     use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
-    let generated = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let generated =
+        rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
     let ca = TempFile::new(generated.cert.pem().as_bytes());
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(generated.key_pair.serialize_der()));
     let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
@@ -522,7 +526,7 @@ async fn tls_verifies_certificates_and_accepts_an_explicit_ca() {
     .unwrap();
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("wss://localhost:{}", listener.local_addr().unwrap().port());
+    let url = format!("wss://127.0.0.1:{}", listener.local_addr().unwrap().port());
     let server = tokio::spawn(async move {
         let mut clients = JoinSet::new();
         for _ in 0..6 {
