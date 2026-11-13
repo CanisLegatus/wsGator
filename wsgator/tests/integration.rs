@@ -696,3 +696,80 @@ async fn a_non_reading_peer_cannot_block_writes_or_shutdown_forever() {
     assert_eq!(report.active_at_end, 0);
     assert!(report.elapsed_seconds < 1.5);
 }
+
+#[tokio::test]
+async fn observers_receive_real_live_counters_and_the_drained_final_state() {
+    let server = Server::start(Mode::Echo).await;
+    let cfg = config(&server.url, &["flood", "--rate", "20"]);
+    let (sender, mut updates) =
+        tokio::sync::watch::channel(wsgator::report::LiveSnapshot::default());
+    let task = tokio::spawn(wsgator::run_with_updates(
+        cfg,
+        CancellationToken::new(),
+        sender,
+    ));
+    timeout(Duration::from_secs(2), async {
+        loop {
+            updates.changed().await.unwrap();
+            if updates.borrow().messages_sent > 0 {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(updates.borrow().connected > 0);
+    assert!(updates.borrow().active > 0);
+    let report = task.await.unwrap().unwrap();
+    let final_state = updates.borrow().clone();
+    assert!(final_state.finished);
+    assert_eq!(final_state.active, 0);
+    assert_eq!(final_state.messages_sent, report.messages_sent);
+    assert_eq!(final_state.messages_received, report.messages_received);
+    assert_eq!(final_state.errors, report.errors);
+    server.drained().await;
+}
+
+#[tokio::test]
+async fn closed_observer_does_not_stop_the_load_engine() {
+    let server = Server::start(Mode::Echo).await;
+    let (sender, receiver) = tokio::sync::watch::channel(wsgator::report::LiveSnapshot::default());
+    drop(receiver);
+    let report = wsgator::run_with_updates(
+        config(&server.url, &["silent"]),
+        CancellationToken::new(),
+        sender,
+    )
+    .await
+    .unwrap();
+    assert!(!report.has_errors(), "{report:?}");
+    assert_eq!(report.connected, 3);
+    server.drained().await;
+}
+
+#[tokio::test]
+async fn interactive_commands_explain_missing_terminal_instead_of_hanging() {
+    use tokio::process::Command;
+    for args in [vec![], vec!["tui", "--no-profile"]] {
+        let output = timeout(
+            Duration::from_secs(3),
+            Command::new(env!("CARGO_BIN_EXE_wsgator"))
+                .args(args)
+                .stdin(std::process::Stdio::null())
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("needs a terminal"));
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_wsgator"))
+        .arg("--help")
+        .output()
+        .await
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("tui"));
+}

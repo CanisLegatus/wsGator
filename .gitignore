@@ -1,3 +1,6 @@
 target/
 **/*.rs.bk
 *.log
+
+# Interactive report exports
+wsgator-report-*.json

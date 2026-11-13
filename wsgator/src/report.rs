@@ -67,7 +67,7 @@ impl Counters {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Latency {
     pub samples: u64,
     pub min_ms: f64,
@@ -95,7 +95,7 @@ impl Latency {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Report {
     pub schema_version: u32,
     pub version: &'static str,
@@ -192,5 +192,51 @@ impl Report {
             }
         }
         s
+    }
+}
+
+/// A bounded, replaceable observation for interactive frontends. Counters are cumulative;
+/// consumers compute rates from consecutive samples rather than from rendering frequency.
+#[derive(Debug, Clone, Default)]
+pub struct LiveSnapshot {
+    pub elapsed_seconds: f64,
+    pub draining: bool,
+    pub finished: bool,
+    pub attempted: u64,
+    pub connected: u64,
+    pub active: u64,
+    pub peak_active: u64,
+    pub messages_sent: u64,
+    pub messages_received: u64,
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    pub pings_sent: u64,
+    pub pongs_received: u64,
+    pub missed_send_slots: u64,
+    pub handshake: Option<Latency>,
+    pub ping_rtt: Option<Latency>,
+    pub errors: BTreeMap<String, u64>,
+}
+impl Counters {
+    pub fn snapshot(&self, elapsed_seconds: f64, draining: bool, finished: bool) -> LiveSnapshot {
+        LiveSnapshot {
+            elapsed_seconds,
+            draining,
+            finished,
+            attempted: load(&self.attempted),
+            connected: load(&self.connected),
+            active: load(&self.active),
+            peak_active: load(&self.peak_active),
+            messages_sent: load(&self.messages_sent),
+            messages_received: load(&self.messages_received),
+            bytes_sent: load(&self.bytes_sent),
+            bytes_received: load(&self.bytes_received),
+            pings_sent: load(&self.pings_sent),
+            pongs_received: load(&self.pongs_received),
+            missed_send_slots: load(&self.missed_send_slots),
+            handshake: Latency::snapshot(&self.handshake),
+            ping_rtt: Latency::snapshot(&self.rtt),
+            errors: self.errors.lock().unwrap().clone(),
+        }
     }
 }

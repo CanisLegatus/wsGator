@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Arg, ArgAction, Command, CommandFactory, FromArgMatches};
 use std::{
     io::{self, Write},
     path::Path,
@@ -9,7 +9,25 @@ use wsgator::config::Config;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let config = Config::parse();
+    if std::env::args_os().len() == 1 {
+        return interactive(false, None).await;
+    }
+    let matches = Config::command()
+        .subcommand(
+            Command::new("tui")
+                .about("Open the persistent interactive control deck")
+                .arg(
+                    Arg::new("no-profile")
+                        .long("no-profile")
+                        .action(ArgAction::SetTrue)
+                        .help("Do not read or write the local settings profile"),
+                ),
+        )
+        .get_matches();
+    if let Some(("tui", args)) = matches.subcommand() {
+        return interactive(args.get_flag("no-profile"), Some(&matches)).await;
+    }
+    let config = Config::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
     let json_path = config.json.clone();
     let stop = CancellationToken::new();
     let run = wsgator::run(config, stop.clone());
@@ -56,5 +74,15 @@ async fn main() -> ExitCode {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+async fn interactive(no_profile: bool, matches: Option<&clap::ArgMatches>) -> ExitCode {
+    match wsgator::tui::run(no_profile, matches).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("wsGator: {error}");
+            ExitCode::from(2)
+        }
     }
 }

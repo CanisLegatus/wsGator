@@ -1,6 +1,6 @@
 use crate::{
     config::{Behavior, Config},
-    report::{Counters, Latency, Report, add, inc, load},
+    report::{Counters, Latency, LiveSnapshot, Report, add, inc, load},
 };
 use futures::{SinkExt, StreamExt};
 use std::{
@@ -11,7 +11,7 @@ use std::{
 use tokio::{
     io::AsyncReadExt,
     net::TcpStream,
-    sync::Semaphore,
+    sync::{Semaphore, watch},
     task::JoinSet,
     time::{Instant, MissedTickBehavior, interval, sleep_until, timeout},
 };
@@ -97,6 +97,24 @@ impl Prepared {
 /// Run a flat load and drain every client before returning. Cancelling `stop` requests
 /// graceful shutdown; dropping the run future aborts its owned client tasks.
 pub async fn run(config: Config, stop: CancellationToken) -> Result<Report, String> {
+    run_inner(config, stop, None).await
+}
+
+/// Stream at most four observations per second through a watch channel. Slow frontends
+/// receive the latest state without growing an event queue or slowing down clients.
+pub async fn run_with_updates(
+    config: Config,
+    stop: CancellationToken,
+    updates: watch::Sender<LiveSnapshot>,
+) -> Result<Report, String> {
+    run_inner(config, stop, Some(updates)).await
+}
+
+async fn run_inner(
+    config: Config,
+    stop: CancellationToken,
+    updates: Option<watch::Sender<LiveSnapshot>>,
+) -> Result<Report, String> {
     let prepared = Arc::new(Prepared::new(config).await?);
     let config = &prepared.config;
     let counters = Arc::new(Counters::default());
@@ -114,7 +132,8 @@ pub async fn run(config: Config, stop: CancellationToken) -> Result<Report, Stri
             shutdown.clone(),
         ));
     }
-    let mut progress = interval(Duration::from_secs(1));
+    let mut progress = interval(Duration::from_millis(250));
+    let mut last_printed = -1.0;
     progress.set_missed_tick_behavior(MissedTickBehavior::Skip);
     // Keep the configured observation window even if every connection fails early.
     loop {
@@ -125,13 +144,23 @@ pub async fn run(config: Config, stop: CancellationToken) -> Result<Report, Stri
             result = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(Err(_)) = result { counters.error("client_task_failed"); }
             }
-            _ = progress.tick(), if config.progress => {
-                eprintln!("active={} connected={} sent={} received={} elapsed={:.1}s", load(&counters.active), load(&counters.connected), load(&counters.messages_sent), load(&counters.messages_received), started.elapsed().as_secs_f64());
+            _ = progress.tick(), if config.progress || updates.is_some() => {
+                let elapsed = started.elapsed().as_secs_f64();
+                if let Some(updates) = &updates {
+                    updates.send_replace(counters.snapshot(elapsed, false, false));
+                }
+                if config.progress && elapsed - last_printed >= 1.0 {
+                    eprintln!("active={} connected={} sent={} received={} elapsed={:.1}s", load(&counters.active), load(&counters.connected), load(&counters.messages_sent), load(&counters.messages_received), elapsed);
+                    last_printed = elapsed;
+                }
             }
         }
     }
     let load_duration_seconds = started.elapsed().as_secs_f64();
     shutdown.cancel();
+    if let Some(updates) = &updates {
+        updates.send_replace(counters.snapshot(load_duration_seconds, true, false));
+    }
     while let Some(result) = tasks.join_next().await {
         if result.is_err() {
             counters.error("client_task_failed");
@@ -142,6 +171,9 @@ pub async fn run(config: Config, stop: CancellationToken) -> Result<Report, Stri
             || load(&counters.cancelled_connects) > 0)
     {
         counters.error("load_incomplete");
+    }
+    if let Some(updates) = &updates {
+        updates.send_replace(counters.snapshot(load_duration_seconds, false, true));
     }
     let mut target = url::Url::parse(&config.url).map_err(|e| e.to_string())?;
     target.set_query(None);

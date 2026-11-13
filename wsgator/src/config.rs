@@ -7,11 +7,11 @@ use tokio_tungstenite::tungstenite::{
 };
 
 /// WebSocket load testing: hold connections, measure heartbeat, or send paced traffic.
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Parser)]
 #[command(
     version,
     about,
-    after_help = "Examples:\n  wsgator silent --url ws://127.0.0.1:9001 -c 100 -d 30s\n  wsgator ping-pong --interval 1s --timeout 3s\n  wsgator flood --rate 20 --message hello\n\nDuration covers connection setup and traffic. Flood rate is per connection."
+    after_help = "Run without arguments to open the interactive control deck.\n\nExamples:\n  wsgator silent --url ws://127.0.0.1:9001 -c 100 -d 30s\n  wsgator ping-pong --interval 1s --timeout 3s\n  wsgator flood --rate 20 --message hello\n\nDuration covers connection setup and traffic. Flood rate is per connection."
 )]
 pub struct Config {
     #[command(subcommand)]
