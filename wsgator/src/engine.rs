@@ -1,11 +1,12 @@
 use crate::{
     config::{Behavior, Config},
-    report::{Counters, Latency, LiveSnapshot, Report, add, inc, load},
+    load::{LoadPlan, PhaseKind},
+    report::{Counters, Latency, LiveSnapshot, PhaseStart, Report, add, inc, load},
 };
 use futures::{SinkExt, StreamExt};
 use std::{
     io::Cursor,
-    sync::{Arc, atomic::Ordering},
+    sync::{Arc, Mutex, atomic::Ordering},
     time::Duration,
 };
 use tokio::{
@@ -94,7 +95,7 @@ impl Prepared {
     }
 }
 
-/// Run a flat load and drain every client before returning. Cancelling `stop` requests
+/// Run a load profile and drain every client before returning. Cancelling `stop` requests
 /// graceful shutdown; dropping the run future aborts its owned client tasks.
 pub async fn run(config: Config, stop: CancellationToken) -> Result<Report, String> {
     run_inner(config, stop, None).await
@@ -117,13 +118,19 @@ async fn run_inner(
 ) -> Result<Report, String> {
     let prepared = Arc::new(Prepared::new(config).await?);
     let config = &prepared.config;
-    let counters = Arc::new(Counters::default());
+    let plan = LoadPlan::new(config);
+    let phased = !plan.phases.is_empty();
+    let counters = Arc::new(Counters {
+        phase_latency: phased.then(Mutex::default),
+        ..Counters::default()
+    });
     let semaphore = Arc::new(Semaphore::new(config.connect_concurrency as usize));
     let shutdown = stop.child_token();
     let started = Instant::now();
-    let deadline = started + config.duration;
+    let deadline = started + plan.duration;
     let mut tasks = JoinSet::new();
-    for id in 0..config.connections {
+    let mut next_client = 0;
+    let spawn = |tasks: &mut JoinSet<()>, id| {
         tasks.spawn(client(
             id,
             prepared.clone(),
@@ -131,16 +138,36 @@ async fn run_inner(
             semaphore.clone(),
             shutdown.clone(),
         ));
+    };
+    if !phased {
+        for id in 0..plan.connections {
+            spawn(&mut tasks, id);
+        }
     }
+    let mut phases = Vec::new();
+    let mut scheduled = plan.phases.iter().copied();
+    let mut phase = scheduled.next();
+    let mut phase_start = phase.map(|phase| PhaseStart::scheduled(phase, LiveSnapshot::default()));
     let mut progress = interval(Duration::from_millis(250));
     let mut last_printed = -1.0;
     progress.set_missed_tick_behavior(MissedTickBehavior::Skip);
     // Keep the configured observation window even if every connection fails early.
     loop {
+        let phase_end = phase.map_or(deadline, |phase| started + phase.end());
+        let admission = phase
+            .filter(|phase| next_client < phase.target)
+            .map(|phase| started + phase.admission_time(next_client));
         tokio::select! {
             biased;
             _ = stop.cancelled() => break,
             _ = sleep_until(deadline) => break,
+            _ = sleep_until(phase_end), if phase_end < deadline => {
+                let snapshot = counters.snapshot(started.elapsed().as_secs_f64(), false, false);
+                phases.push(phase_start.take().unwrap().finish(&snapshot, &counters));
+                let next = scheduled.next().expect("phase ends before the load deadline");
+                phase_start = Some(PhaseStart::scheduled(next, snapshot));
+                phase = Some(next);
+            }
             result = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(Err(_)) = result { counters.error("client_task_failed"); }
             }
@@ -154,9 +181,42 @@ async fn run_inner(
                     last_printed = elapsed;
                 }
             }
+            _ = async {
+                let now = Instant::now();
+                let at = admission.unwrap();
+                if now >= phase_end {
+                    sleep_until(phase_end).await;
+                } else if at > now {
+                    sleep_until(at).await;
+                }
+            }, if admission.is_some() => {
+                let phase = phase.unwrap();
+                let elapsed = started.elapsed();
+                if elapsed < phase.end() {
+                    // Batch only slots already due and return to select between batches.
+                    for _ in 0..256 {
+                        if next_client == phase.target || phase.admission_time(next_client) > elapsed {
+                            break;
+                        }
+                        spawn(&mut tasks, next_client);
+                        next_client += 1;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
         }
     }
     let load_duration_seconds = started.elapsed().as_secs_f64();
+    let drain_start = phase_start.map(|phase| {
+        let snapshot = counters.snapshot(load_duration_seconds, true, false);
+        phases.push(phase.finish(&snapshot, &counters));
+        PhaseStart {
+            kind: PhaseKind::Drain,
+            target: 0,
+            planned_duration: None,
+            snapshot,
+        }
+    });
     shutdown.cancel();
     if let Some(updates) = &updates {
         updates.send_replace(counters.snapshot(load_duration_seconds, true, false));
@@ -167,10 +227,15 @@ async fn run_inner(
         }
     }
     if !stop.is_cancelled()
-        && (load(&counters.attempted) < config.connections as u64
+        && (load(&counters.attempted) < plan.connections as u64
             || load(&counters.cancelled_connects) > 0)
     {
         counters.error("load_incomplete");
+    }
+    let elapsed_seconds = started.elapsed().as_secs_f64();
+    if let Some(drain) = drain_start {
+        let snapshot = counters.snapshot(elapsed_seconds, false, true);
+        phases.push(drain.finish(&snapshot, &counters));
     }
     if let Some(updates) = &updates {
         updates.send_replace(counters.snapshot(load_duration_seconds, false, true));
@@ -201,16 +266,16 @@ async fn run_inner(
         version: env!("CARGO_PKG_VERSION"),
         target: target.to_string(),
         behavior: behavior.into(),
-        requested_connections: config.connections,
+        requested_connections: plan.connections,
         connect_concurrency: config.connect_concurrency,
         connect_timeout_seconds: config.connect_timeout.as_secs_f64(),
         write_timeout_seconds: config.write_timeout.as_secs_f64(),
         close_timeout_seconds: config.close_timeout.as_secs_f64(),
         max_message_bytes: config.max_message_bytes,
         subprotocol: config.subprotocol.clone(),
-        configured_duration_seconds: config.duration.as_secs_f64(),
+        configured_duration_seconds: plan.duration.as_secs_f64(),
         load_duration_seconds,
-        elapsed_seconds: started.elapsed().as_secs_f64(),
+        elapsed_seconds,
         interrupted: stop.is_cancelled(),
         payload_bytes: prepared.payload.as_ref().map(Message::len),
         messages_per_second_per_connection: rate,
@@ -222,7 +287,7 @@ async fn run_inner(
         active_at_end: load(&counters.active),
         completed: load(&counters.completed),
         cancelled_connects: load(&counters.cancelled_connects),
-        not_attempted: config.connections as u64 - load(&counters.attempted),
+        not_attempted: plan.connections as u64 - load(&counters.attempted),
         messages_sent: load(&counters.messages_sent),
         messages_received: load(&counters.messages_received),
         bytes_sent: load(&counters.bytes_sent),
@@ -240,6 +305,8 @@ async fn run_inner(
         handshake: Latency::snapshot(&counters.handshake),
         ping_rtt: Latency::snapshot(&counters.rtt),
         errors: counters.errors.lock().unwrap().clone(),
+        phases,
+        load_profile: config.load_profile.as_ref().map(ToString::to_string),
     })
 }
 
@@ -288,7 +355,7 @@ async fn client(
             return;
         }
     };
-    Counters::record(&c.handshake, started.elapsed());
+    c.record_handshake(started.elapsed());
     c.opened();
     let _active = Active(c.clone());
     if let Err(error) = session(id, &mut ws, &p, &c, &stop).await
@@ -364,7 +431,7 @@ async fn session(
                         if let Some((expected, at)) = &pending
                             && expected.as_slice() == data.as_ref()
                         {
-                            Counters::record(&c.rtt, at.elapsed());
+                            c.record_ping_rtt(at.elapsed());
                             pending = None;
                         }
                     }

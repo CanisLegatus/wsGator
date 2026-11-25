@@ -266,6 +266,9 @@ fn export(report: &crate::report::Report) -> Result<PathBuf, String> {
     Ok(path)
 }
 fn seed(draft: &mut Draft, matches: &ArgMatches) {
+    if let Some(profile) = matches.get_one::<crate::LoadProfile>("load_profile") {
+        draft.load_profile = profile.to_string();
+    }
     for (id, field) in [
         ("url", &mut draft.url),
         ("subprotocol", &mut draft.subprotocol),

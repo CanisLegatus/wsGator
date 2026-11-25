@@ -59,6 +59,8 @@ fn report() -> Report {
         handshake: None,
         ping_rtt: None,
         errors: BTreeMap::new(),
+        phases: Vec::new(),
+        load_profile: None,
     }
 }
 fn render(app: &mut State, width: u16, height: u16) -> String {

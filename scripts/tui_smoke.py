@@ -129,9 +129,12 @@ def main():
             terminal = Terminal(directory, url, binaries)
             terminal.send("\x1b[C")  # Ping-pong -> Flood, reset focus to target.
             terminal.send("\t\t\t\r\x1540\r")
+            terminal.send("\t\t\t\t\r\x15ramp:750ms\r")
+            terminal.wait("ramp:750ms")
             terminal.screenshot(args.screenshots, "configure")
             terminal.send("\x1b[15~")  # F5
             terminal.wait("12 established")
+            terminal.wait("hold · 12 target")
             terminal.pump(1.0)
             terminal.screenshot(args.screenshots, "telemetry")
             terminal.wait("Results retained")
@@ -143,6 +146,8 @@ def main():
             assert report["behavior"] == "flood-text", report
             assert report["connected"] == 12 and report["active_at_end"] == 0, report
             assert report["messages_sent"] > 0 and not report["errors"], report
+            assert [p["kind"] for p in report["phases"]] == ["ramp", "hold", "drain"], report
+            assert report["phases"][1]["active_at_start"] == 12, report
             terminal.send("3")
             terminal.wait("SESSION LOGBOOK")
             terminal.screenshot(args.screenshots, "sessions")
@@ -177,7 +182,9 @@ def main():
             assert b"\x1b[?1049l" in terminal.raw, "alternate screen was not restored"
             profile = directory / "profile/wsgator/profile.json"
             assert profile.exists(), "settings profile was not saved"
-            assert json.loads(profile.read_text())["connections"] == "12", "demo overwrote the user's profile"
+            settings = json.loads(profile.read_text())
+            assert settings["connections"] == "12", "demo overwrote the user's profile"
+            assert settings["load_profile"] == "ramp:750ms", settings
             print("TUI smoke passed: default launch, editing, live telemetry, completion, JSON export, history, rerun, stop, resize, help, local demo, OS interrupt, terminal restoration.")
     finally:
         if terminal is not None:

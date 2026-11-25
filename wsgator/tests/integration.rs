@@ -18,7 +18,7 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message},
 };
 use tokio_util::sync::CancellationToken;
-use wsgator::{config::Config, report::Report};
+use wsgator::{PhaseKind, config::Config, report::Report};
 
 #[derive(Clone, Copy)]
 enum Mode {
@@ -31,6 +31,7 @@ enum Mode {
     RemoteClose,
     Oversized,
     NoRead,
+    SlowHandshake,
 }
 struct Server {
     url: String,
@@ -73,6 +74,9 @@ impl Server {
                             let (stream, _) = result.unwrap();
                             let active = active.clone(); let received = received.clone();
                             clients.spawn(async move {
+                                if matches!(mode, Mode::SlowHandshake) {
+                                    sleep(Duration::from_millis(250)).await;
+                                }
                                 let ws = accept_async(stream).await.unwrap();
                                 active.fetch_add(1, Ordering::SeqCst);
                                 let _active = Active(active);
@@ -599,6 +603,36 @@ async fn cli_stdout_json_and_failure_exit_codes() {
     assert_eq!(json["connected"], 2);
     assert_eq!(json["active_at_end"], 0);
     assert!(json["errors"].as_object().unwrap().is_empty());
+    assert!(json.get("load_profile").is_none());
+    assert!(json.get("phases").is_none());
+    let output = timeout(
+        Duration::from_secs(5),
+        Command::new(env!("CARGO_BIN_EXE_wsgator"))
+            .args([
+                "--load-profile",
+                "1@250ms,2@250ms",
+                "silent",
+                "--url",
+                &server.url,
+                "--json",
+                "-",
+            ])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["load_profile"], "1@250ms,2@250ms");
+    assert_eq!(json["phases"][0]["target_connections"], 1);
+    assert_eq!(json["phases"][1]["target_connections"], 2);
+    assert_eq!(json["phases"][2]["kind"], "drain");
     let failing = Server::start(Mode::RemoteClose).await;
     let output = timeout(
         Duration::from_secs(5),
@@ -772,4 +806,181 @@ async fn interactive_commands_explain_missing_terminal_instead_of_hanging() {
         .unwrap();
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("tui"));
+}
+
+#[tokio::test]
+async fn ramp_paces_admissions_and_reports_hold_and_drain() {
+    let server = Server::start(Mode::Echo).await;
+    let cfg = config(
+        &server.url,
+        &[
+            "ping-pong",
+            "--interval",
+            "30ms",
+            "--load-profile",
+            "ramp:900ms",
+        ],
+    );
+    let (updates, mut live) = tokio::sync::watch::channel(Default::default());
+    let task = tokio::spawn(wsgator::run_with_updates(
+        cfg,
+        CancellationToken::new(),
+        updates,
+    ));
+    let early = timeout(
+        Duration::from_millis(650),
+        live.wait_for(|snapshot| snapshot.connected > 0),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .clone();
+    assert!(early.attempted < 3, "{early:?}");
+
+    let report = timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(!report.has_errors(), "{report:?}");
+    assert_eq!(report.configured_duration_seconds, 1.4);
+    let [ramp, hold, drain] = report.phases.as_slice() else {
+        panic!("unexpected phases: {:?}", report.phases);
+    };
+    assert_eq!(
+        (ramp.kind, hold.kind, drain.kind),
+        (PhaseKind::Ramp, PhaseKind::Hold, PhaseKind::Drain)
+    );
+    assert_eq!(ramp.connected, 3);
+    assert_eq!(hold.active_at_start, 3);
+    assert_eq!(hold.active_at_end, 3);
+    assert!(hold.ping_rtt.as_ref().unwrap().samples > 0);
+    assert_eq!(ramp.handshake.as_ref().unwrap().samples, 3);
+    assert_eq!(drain.active_at_end, 0);
+    assert_eq!(
+        report
+            .phases
+            .iter()
+            .map(|phase| phase.ping_rtt.as_ref().map_or(0, |rtt| rtt.samples))
+            .sum::<u64>(),
+        report.ping_rtt.unwrap().samples
+    );
+    let json = serde_json::to_value(&report.phases).unwrap();
+    assert_eq!(json[1]["target_connections"], 3);
+    server.drained().await;
+}
+
+#[tokio::test]
+async fn steps_report_late_handshakes_and_use_the_profile_targets() {
+    let server = Server::start(Mode::SlowHandshake).await;
+    let cfg = config(
+        &server.url,
+        &["silent", "--load-profile", "2@120ms,5@600ms"],
+    );
+    let report = run(cfg).await;
+    assert!(!report.has_errors(), "{report:?}");
+    assert_eq!(report.requested_connections, 5);
+    assert_eq!(report.configured_duration_seconds, 0.72);
+    let [first, second, drain] = report.phases.as_slice() else {
+        panic!("unexpected phases: {:?}", report.phases);
+    };
+    assert_eq!(
+        (first.kind, second.kind),
+        (PhaseKind::Step, PhaseKind::Step)
+    );
+    assert_eq!(
+        (first.target_connections, second.target_connections),
+        (2, 5)
+    );
+    assert_eq!((first.attempted, second.attempted), (2, 3));
+    assert_eq!(first.active_at_end, 0);
+    assert_eq!(second.active_at_start, 0);
+    assert_eq!(second.active_at_end, 5);
+    assert_eq!(second.handshake.as_ref().unwrap().samples, 5);
+    assert_eq!(drain.active_at_end, 0);
+    server.drained().await;
+}
+
+#[tokio::test]
+async fn failed_handshakes_are_counted_in_the_load_phase() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let mut streams = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            streams.push(stream);
+        }
+    });
+    let cfg = config(
+        &url,
+        &[
+            "silent",
+            "--load-profile",
+            "2@250ms",
+            "--connect-timeout",
+            "50ms",
+        ],
+    );
+    let report = run(cfg).await;
+    assert_eq!(report.errors.get("connect_timeout"), Some(&2));
+    assert_eq!(report.phases[0].errors, report.errors);
+    assert_eq!(report.phases[0].active_at_end, 0);
+    assert!(report.phases[1].errors.is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn interrupt_during_ramp_does_not_start_future_clients() {
+    let server = Server::start(Mode::Echo).await;
+    let cfg = config(&server.url, &["silent", "--load-profile", "ramp:30s"]);
+    let stop = CancellationToken::new();
+    let (updates, mut live) = tokio::sync::watch::channel(Default::default());
+    let task = tokio::spawn(wsgator::run_with_updates(cfg, stop.clone(), updates));
+    timeout(
+        Duration::from_secs(3),
+        live.wait_for(|snapshot| snapshot.active > 0),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    stop.cancel();
+    let report = timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(report.interrupted);
+    assert!(!report.has_errors());
+    assert_eq!(
+        (report.attempted, report.not_attempted, report.active_at_end),
+        (1, 2, 0)
+    );
+    assert_eq!(
+        report
+            .phases
+            .iter()
+            .map(|phase| phase.kind)
+            .collect::<Vec<_>>(),
+        [PhaseKind::Ramp, PhaseKind::Drain]
+    );
+    server.drained().await;
+}
+
+#[test]
+fn cli_rejects_invalid_load_profiles() {
+    for profile in [
+        "ramp:0s",
+        "ramp:xyz",
+        "0@1s",
+        "5@1s,4@1s",
+        "5@1s,5@1s",
+        "1@4days,2@4days",
+        "1000001@1s",
+        "3@1s,",
+    ] {
+        assert!(
+            Config::try_parse_from(["wsgator", "silent", "--load-profile", profile]).is_err(),
+            "{profile}"
+        );
+    }
 }

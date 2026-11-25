@@ -1,3 +1,4 @@
+use crate::load::LoadProfile;
 use clap::{Args, Parser, Subcommand};
 use std::{path::PathBuf, time::Duration};
 use tokio_tungstenite::tungstenite::{
@@ -19,12 +20,15 @@ pub struct Config {
     /// Target WebSocket URL (ws:// or wss://)
     #[arg(short, long, global = true, default_value = "ws://127.0.0.1:9001", value_parser = parse_url)]
     pub url: String,
-    /// Number of clients; handshakes run concurrently up to --connect-concurrency
+    /// Number of clients for flat load or a ramp; stepped profiles specify their own targets
     #[arg(short = 'c', long, alias = "connection-number", global = true, default_value = "100", value_parser = clap::value_parser!(u32).range(1..=1_000_000))]
     pub connections: u32,
-    /// Total run duration, including connection setup (e.g. 30s, 2m)
+    /// Flat observation window or ramp hold duration (e.g. 30s, 2m)
     #[arg(short = 'd', long, global = true, default_value = "30s", value_parser = parse_duration)]
     pub duration: Duration,
+    /// ramp:10s or increasing steps such as 100@5s,200@10s (steps set targets and durations)
+    #[arg(long, global = true)]
+    pub load_profile: Option<LoadProfile>,
     /// Maximum simultaneous handshakes
     #[arg(long, global = true, default_value = "256", value_parser = clap::value_parser!(u32).range(1..=65_536))]
     pub connect_concurrency: u32,
@@ -89,7 +93,7 @@ pub struct Flood {
     pub binary: bool,
 }
 
-fn parse_duration(s: &str) -> Result<Duration, String> {
+pub(crate) fn parse_duration(s: &str) -> Result<Duration, String> {
     let d = humantime::parse_duration(s).map_err(|e| e.to_string())?;
     if d < Duration::from_millis(1) || d > Duration::from_secs(7 * 24 * 3600) {
         return Err("duration must be between 1ms and 7days".into());

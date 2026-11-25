@@ -2,6 +2,7 @@ use super::{
     form::{Field, Mode},
     state::{Phase, Sample, State, Tab},
 };
+use crate::{PhaseKind, load::LoadPlan};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -343,7 +344,8 @@ fn configure(frame: &mut Frame, app: &mut State, area: Rect) {
         let cells = Layout::horizontal([Constraint::Ratio(1, 3); 3])
             .spacing(1)
             .split(inner);
-        let clients = app.draft.connections.parse::<u64>().ok();
+        let plan = app.draft.config().ok().as_ref().map(LoadPlan::new);
+        let clients = plan.as_ref().map(|plan| u64::from(plan.connections));
         let nominal = match app.draft.mode {
             Mode::Silent => "LISTEN ONLY".into(),
             Mode::Flood => clients
@@ -357,8 +359,12 @@ fn configure(frame: &mut Frame, app: &mut State, area: Rect) {
                 .unwrap_or_else(|| "—".into()),
         };
         for ((label, value), cell) in [
-            ("CLIENTS", app.draft.connections.clone()),
-            ("WINDOW", app.draft.duration.clone()),
+            ("CLIENTS", clients.map(count).unwrap_or_else(|| "—".into())),
+            (
+                "WINDOW",
+                plan.map(|plan| humantime::format_duration(plan.duration).to_string())
+                    .unwrap_or_else(|| "—".into()),
+            ),
             ("NOMINAL TX", nominal),
         ]
         .into_iter()
@@ -593,12 +599,15 @@ fn telemetry(frame: &mut Frame, app: &State, area: Rect) {
         if errors == 0 { GREEN } else { RED },
         &[],
     );
-    let config = app.shown_config();
-    let total = config.map(|c| c.duration.as_secs_f64()).unwrap_or_else(|| {
-        humantime::parse_duration(&app.draft.duration)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(30.)
-    });
+    let plan = app.shown_config().map(LoadPlan::new);
+    let total = plan
+        .as_ref()
+        .map(|plan| plan.duration.as_secs_f64())
+        .unwrap_or_else(|| {
+            humantime::parse_duration(&app.draft.duration)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(30.)
+        });
     let elapsed = report
         .map(|r| r.load_duration_seconds)
         .unwrap_or(live.elapsed_seconds);
@@ -615,9 +624,18 @@ fn telemetry(frame: &mut Frame, app: &State, area: Rect) {
                 duration(elapsed),
                 duration(total),
                 if app.viewing.is_some() {
-                    "ARCHIVED"
+                    "ARCHIVED".into()
+                } else if app.phase == Phase::Running {
+                    plan.as_ref()
+                        .and_then(|plan| {
+                            plan.phases
+                                .iter()
+                                .find(|phase| elapsed < phase.end().as_secs_f64())
+                        })
+                        .map(|phase| format!("{} · {} target", phase.kind, phase.target))
+                        .unwrap_or_else(|| app.phase.name().into())
                 } else {
-                    app.phase.name()
+                    app.phase.name().into()
                 }
             ))
             .style(Style::default().fg(TEXT)),
@@ -636,12 +654,7 @@ fn telemetry(frame: &mut Frame, app: &State, area: Rect) {
         .spacing(1)
         .split(graph_cols[0]);
     traffic_chart(frame, graph_rows[0], &samples, heartbeat);
-    connection_chart(
-        frame,
-        graph_rows[1],
-        &samples,
-        config.map(|c| c.connections).unwrap_or(100),
-    );
+    connection_chart(frame, graph_rows[1], &samples, plan.as_ref());
     if graph_cols[1].width > 20 {
         diagnostics(frame, app, graph_cols[1]);
     }
@@ -808,10 +821,34 @@ fn traffic_chart(frame: &mut Frame, area: Rect, samples: &[Sample], heartbeat: b
         empty_signal(frame, area, "AWAITING APPLICATION TRAFFIC");
     }
 }
-fn connection_chart(frame: &mut Frame, area: Rect, samples: &[Sample], target: u32) {
+fn connection_chart(frame: &mut Frame, area: Rect, samples: &[Sample], plan: Option<&LoadPlan>) {
     let active: Vec<_> = samples.iter().map(|s| (s.time, s.active)).collect();
-    let (start, end) = axes(samples);
-    let target_line = [(start, target as f64), (end, target as f64)];
+    let (mut start, end) = axes(samples);
+    if samples.len() < 240 {
+        start = 0.;
+    }
+    let target = plan.map_or(100, |plan| plan.connections);
+    let mut target_line = Vec::new();
+    if let Some(plan) = plan.filter(|plan| !plan.phases.is_empty()) {
+        for phase in &plan.phases {
+            let phase_start = phase.start.as_secs_f64();
+            let phase_end = phase.end().as_secs_f64();
+            let left = start.max(phase_start);
+            let right = end.min(phase_end);
+            if left <= right {
+                for time in [left, right] {
+                    let fraction = if phase.kind == PhaseKind::Ramp {
+                        (time - phase_start) / phase.duration.as_secs_f64()
+                    } else {
+                        1.
+                    };
+                    target_line.push((time, fraction * f64::from(phase.target)));
+                }
+            }
+        }
+    } else {
+        target_line.extend([(start, f64::from(target)), (end, f64::from(target))]);
+    }
     let max = samples
         .iter()
         .map(|s| s.active)
@@ -823,7 +860,7 @@ fn connection_chart(frame: &mut Frame, area: Rect, samples: &[Sample], target: u
                 .name("TARGET")
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(Style::default().fg(EDGE))
+                .style(Style::default().fg(CYAN))
                 .data(&target_line),
             Dataset::default()
                 .name("ACTIVE")
@@ -836,7 +873,7 @@ fn connection_chart(frame: &mut Frame, area: Rect, samples: &[Sample], target: u
         .block(panel(Line::from(vec![
             Span::styled(" 02 CONNECTION ENVELOPE ", bold(TEXT)),
             Span::styled(" ACTIVE ", bold(GREEN)),
-            Span::styled(" TARGET ", Style::default().fg(MUTED)),
+            Span::styled(" TARGET ", Style::default().fg(CYAN)),
         ])))
         .x_axis(
             Axis::default()

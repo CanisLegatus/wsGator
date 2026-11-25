@@ -1,3 +1,4 @@
+use crate::{PhaseKind, load::Phase};
 use hdrhistogram::Histogram;
 use serde::Serialize;
 use std::{
@@ -30,6 +31,13 @@ pub(crate) struct Counters {
     pub errors: Mutex<BTreeMap<String, u64>>,
     pub handshake: Mutex<Option<Histogram<u64>>>,
     pub rtt: Mutex<Option<Histogram<u64>>>,
+    pub phase_latency: Option<Mutex<PhaseLatency>>,
+}
+
+#[derive(Default)]
+pub(crate) struct PhaseLatency {
+    handshake: Option<Histogram<u64>>,
+    ping_rtt: Option<Histogram<u64>>,
 }
 pub(crate) fn inc(counter: &AtomicU64) {
     counter.fetch_add(1, Ordering::Relaxed);
@@ -54,8 +62,19 @@ impl Counters {
         let active = self.active.fetch_add(1, Ordering::Relaxed) + 1;
         self.peak_active.fetch_max(active, Ordering::Relaxed);
     }
-    pub fn record(histogram: &Mutex<Option<Histogram<u64>>>, duration: Duration) {
-        let mut h = histogram.lock().unwrap();
+    pub fn record_handshake(&self, duration: Duration) {
+        Self::record(&mut self.handshake.lock().unwrap(), duration);
+        if let Some(phase) = &self.phase_latency {
+            Self::record(&mut phase.lock().unwrap().handshake, duration);
+        }
+    }
+    pub fn record_ping_rtt(&self, duration: Duration) {
+        Self::record(&mut self.rtt.lock().unwrap(), duration);
+        if let Some(phase) = &self.phase_latency {
+            Self::record(&mut phase.lock().unwrap().ping_rtt, duration);
+        }
+    }
+    fn record(h: &mut Option<Histogram<u64>>, duration: Duration) {
         let h = h.get_or_insert_with(|| {
             Histogram::new_with_bounds(1, 7 * 24 * 3600 * 1_000_000, 3).unwrap()
         });
@@ -79,19 +98,84 @@ pub struct Latency {
 }
 impl Latency {
     pub(crate) fn snapshot(h: &Mutex<Option<Histogram<u64>>>) -> Option<Self> {
-        h.lock()
-            .unwrap()
-            .as_ref()
-            .filter(|h| !h.is_empty())
-            .map(|h| Self {
-                samples: h.len(),
-                min_ms: h.min() as f64 / 1000.,
-                mean_ms: h.mean() / 1000.,
-                p50_ms: h.value_at_quantile(0.5) as f64 / 1000.,
-                p95_ms: h.value_at_quantile(0.95) as f64 / 1000.,
-                p99_ms: h.value_at_quantile(0.99) as f64 / 1000.,
-                max_ms: h.max() as f64 / 1000.,
-            })
+        Self::from_histogram(h.lock().unwrap().as_ref())
+    }
+    fn from_histogram(h: Option<&Histogram<u64>>) -> Option<Self> {
+        h.filter(|h| !h.is_empty()).map(|h| Self {
+            samples: h.len(),
+            min_ms: h.min() as f64 / 1000.,
+            mean_ms: h.mean() / 1000.,
+            p50_ms: h.value_at_quantile(0.5) as f64 / 1000.,
+            p95_ms: h.value_at_quantile(0.95) as f64 / 1000.,
+            p99_ms: h.value_at_quantile(0.99) as f64 / 1000.,
+            max_ms: h.max() as f64 / 1000.,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PhaseReport {
+    pub kind: PhaseKind,
+    pub target_connections: u32,
+    pub planned_duration_seconds: Option<f64>,
+    pub started_at_seconds: f64,
+    pub duration_seconds: f64,
+    pub active_at_start: u64,
+    pub active_at_end: u64,
+    pub attempted: u64,
+    pub connected: u64,
+    pub messages_sent: u64,
+    pub messages_received: u64,
+    pub pings_sent: u64,
+    pub pongs_received: u64,
+    pub handshake: Option<Latency>,
+    pub ping_rtt: Option<Latency>,
+    pub errors: BTreeMap<String, u64>,
+}
+
+pub(crate) struct PhaseStart {
+    pub kind: PhaseKind,
+    pub target: u32,
+    pub planned_duration: Option<Duration>,
+    pub snapshot: LiveSnapshot,
+}
+
+impl PhaseStart {
+    pub fn scheduled(phase: Phase, snapshot: LiveSnapshot) -> Self {
+        Self {
+            kind: phase.kind,
+            target: phase.target,
+            planned_duration: Some(phase.duration),
+            snapshot,
+        }
+    }
+
+    pub fn finish(self, end: &LiveSnapshot, counters: &Counters) -> PhaseReport {
+        let latency =
+            std::mem::take(&mut *counters.phase_latency.as_ref().unwrap().lock().unwrap());
+        let start = self.snapshot;
+        let errors = end.errors.iter().filter_map(|(kind, &count)| {
+            let delta = count - start.errors.get(kind).copied().unwrap_or(0);
+            (delta > 0).then(|| (kind.clone(), delta))
+        });
+        PhaseReport {
+            kind: self.kind,
+            target_connections: self.target,
+            planned_duration_seconds: self.planned_duration.map(|d| d.as_secs_f64()),
+            started_at_seconds: start.elapsed_seconds,
+            duration_seconds: end.elapsed_seconds - start.elapsed_seconds,
+            active_at_start: start.active,
+            active_at_end: end.active,
+            attempted: end.attempted - start.attempted,
+            connected: end.connected - start.connected,
+            messages_sent: end.messages_sent - start.messages_sent,
+            messages_received: end.messages_received - start.messages_received,
+            pings_sent: end.pings_sent - start.pings_sent,
+            pongs_received: end.pongs_received - start.pongs_received,
+            handshake: Latency::from_histogram(latency.handshake.as_ref()),
+            ping_rtt: Latency::from_histogram(latency.ping_rtt.as_ref()),
+            errors: errors.collect(),
+        }
     }
 }
 
@@ -141,6 +225,10 @@ pub struct Report {
     pub handshake: Option<Latency>,
     pub ping_rtt: Option<Latency>,
     pub errors: BTreeMap<String, u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub phases: Vec<PhaseReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_profile: Option<String>,
 }
 impl Report {
     pub fn has_errors(&self) -> bool {
@@ -190,6 +278,18 @@ impl Report {
             for (kind, count) in &self.errors {
                 s.push_str(&format!("Error {kind}: {count}\n"));
             }
+        }
+        for phase in &self.phases {
+            let errors: u64 = phase.errors.values().sum();
+            s.push_str(&format!(
+                "{} {:.3}s | target {} | active {} → {} | errors {}\n",
+                phase.kind,
+                phase.duration_seconds,
+                phase.target_connections,
+                phase.active_at_start,
+                phase.active_at_end,
+                errors,
+            ));
         }
         s
     }

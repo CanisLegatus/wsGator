@@ -41,6 +41,7 @@ pub struct Draft {
     pub url: String,
     pub connections: String,
     pub duration: String,
+    pub load_profile: String,
     pub interval: String,
     pub pong_timeout: String,
     pub rate: String,
@@ -68,6 +69,7 @@ impl Default for Draft {
             url: "ws://127.0.0.1:9001".into(),
             connections: "100".into(),
             duration: "30s".into(),
+            load_profile: String::new(),
             interval: "1s".into(),
             pong_timeout: "5s".into(),
             rate: "10".into(),
@@ -90,6 +92,7 @@ pub enum Field {
     Url,
     Connections,
     Duration,
+    LoadProfile,
     Interval,
     PongTimeout,
     Rate,
@@ -110,7 +113,8 @@ impl Field {
         match self {
             Self::Url => "TARGET ENDPOINT",
             Self::Connections => "CONNECTIONS",
-            Self::Duration => "OBSERVATION WINDOW",
+            Self::Duration => "DURATION / RAMP HOLD",
+            Self::LoadProfile => "LOAD PROFILE (OPTIONAL)",
             Self::Interval => "PING INTERVAL",
             Self::PongTimeout => "PONG TIMEOUT",
             Self::Rate => "MESSAGES / SEC / CLIENT",
@@ -131,7 +135,10 @@ impl Field {
         match self {
             Self::Url => "ws:// or verified wss://. Default: local echo server on port 9001.",
             Self::Connections => "Each client connects once. Failed clients are not replaced.",
-            Self::Duration => "Includes connection setup. Examples: 500ms, 30s, 2m.",
+            Self::Duration => {
+                "Flat observation window or ramp hold time. Steps specify their own durations."
+            }
+            Self::LoadProfile => "Empty for flat load. Try ramp:10s or 100@5s,200@10s.",
             Self::Interval => "Delay between Ping frames. At most one Ping is in flight.",
             Self::PongTimeout => "Fail a client if its matching Pong does not arrive in time.",
             Self::Rate => "Per-client target; backpressure skips slots without catch-up bursts.",
@@ -166,6 +173,7 @@ impl Draft {
             Mode::PingPong => fields.extend([Interval, PongTimeout]),
             Mode::Flood => fields.extend([Rate, Message, PayloadFile, Binary]),
         }
+        fields.push(LoadProfile);
         if advanced {
             fields.extend([
                 Concurrency,
@@ -185,6 +193,7 @@ impl Draft {
             Field::Url => &self.url,
             Field::Connections => &self.connections,
             Field::Duration => &self.duration,
+            Field::LoadProfile => &self.load_profile,
             Field::Interval => &self.interval,
             Field::PongTimeout => &self.pong_timeout,
             Field::Rate => &self.rate,
@@ -212,6 +221,7 @@ impl Draft {
             Field::Url => &mut self.url,
             Field::Connections => &mut self.connections,
             Field::Duration => &mut self.duration,
+            Field::LoadProfile => &mut self.load_profile,
             Field::Interval => &mut self.interval,
             Field::PongTimeout => &mut self.pong_timeout,
             Field::Rate => &mut self.rate,
@@ -262,6 +272,9 @@ impl Draft {
                 }
             }
         }
+        if !self.load_profile.trim().is_empty() {
+            args.extend(["--load-profile".into(), self.load_profile.clone()]);
+        }
         if !self.subprotocol.is_empty() {
             args.extend(["--subprotocol".into(), self.subprotocol.clone()]);
         }
@@ -287,6 +300,11 @@ impl Draft {
             url: c.url.clone(),
             connections: c.connections.to_string(),
             duration: humantime::format_duration(c.duration).to_string(),
+            load_profile: c
+                .load_profile
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
             concurrency: c.connect_concurrency.to_string(),
             connect_timeout: humantime::format_duration(c.connect_timeout).to_string(),
             write_timeout: humantime::format_duration(c.write_timeout).to_string(),
